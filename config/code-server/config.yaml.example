@@ -1,0 +1,4 @@
+bind-addr: 0.0.0.0:5522
+auth: password
+password: change-me
+cert: false

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "jetro": {
+      "type": "stdio",
+      "command": "C:\\Users\\SPIDI\\.jetro\\runtime\\node-win32-x64.exe",
+      "args": [
+        "C:\\Users\\SPIDI\\.jetro\\mcp-server\\index.js"
+      ],
+      "env": {
+        "JET_WORKSPACE": "d:\\Working\\AI-IDE",
+        "JET_API_URL": "https://api.jetro.ai",
+        "PATH": "C:\\Users\\SPIDI\\.jetro\\runtime;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\Microsoft VS Code;C:\\Program Files\\Common Files\\Oracle\\Java\\javapath;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Users\\SPIDI\\AppData\\Roaming\\nvm;C:\\Program Files\\nodejs;C:\\Program Files\\Java\\jdk-17\\bin;C:\\Users\\SPIDI\\AppData\\Local\\Android\\Sdk;C:\\Users\\SPIDI\\AppData\\Local\\Android\\Sdk\\platform-tools;C:\\Users\\SPIDI\\AppData\\Local\\Android\\Sdk\\emulator;C:\\Users\\SPIDI\\AppData\\Local\\Android\\Sdk\\ndk\\27.1.12297006;C:\\Users\\SPIDI\\AppData\\Local\\Android\\Sdk\\cmake\\4.1.2\\bin;C:\\Users\\SPIDI\\AppData\\Local\\Android\\Sdk\\cmdline-tools\\latest\\bin;C:\\Program Files\\dotnet\\;C:\\Program Files\\MongoDB\\Server\\8.2\\bin;C:\\Program Files\\Cloudflare\\Cloudflare WARP\\;C:\\Program Files\\Git\\cmd;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\Python\\Python310\\Scripts\\;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\Python\\Python310\\;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\Python\\Python314\\Scripts\\;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\Python\\Python314\\;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\Python\\Launcher\\;C:\\Users\\SPIDI\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\Microsoft VS Code\\bin;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\Qoder\\bin;C:\\Users\\SPIDI\\AppData\\Local\\GitHubDesktop\\bin;C:\\Program Files\\Android\\Android Studio\\jbr\\bin;C:\\Users\\SPIDI\\AppData\\Local\\PowerToys\\DSCModules\\;C:\\Users\\SPIDI\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Ngrok.Ngrok_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\cursor\\resources\\app\\bin;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\Antigravity\\bin;C:\\Users\\SPIDI\\.local\\bin;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\Swift\\Toolchains\\6.3.0+Asserts\\usr\\bin\\;C:\\Users\\SPIDI\\AppData\\Local\\Programs\\Swift\\Runtimes\\6.3.0\\usr\\bin\\"
+      }
+    }
+  }
+}

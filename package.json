@@ -1,0 +1,27 @@
+{
+  "name": "ai-ide-studio",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:backend": "npm run dev --prefix backend",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "code-server": "node scripts/start-code-server.js",
+    "code-server:verify": "node scripts/verify-code-server.js"
+  },
+  "dependencies": {
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.8.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.6.3"
+  }
+}

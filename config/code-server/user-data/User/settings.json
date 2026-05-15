@@ -1,0 +1,20 @@
+{
+  "workbench.statusBar.visible": false,
+  "window.commandCenter": false,
+
+  // --- Zen mode disabled, won't auto-restore on reload ---
+  "zenMode.restore": false,
+  "zenMode.fullScreen": false,
+  "zenMode.centerLayout": false,
+  "zenMode.hideTabs": true,
+  "zenMode.hideStatusBar": true,
+  "zenMode.hideActivityBar": false,
+
+  // --- Centered layout disabled ---
+  "workbench.editor.centeredLayoutAutoResize": false,
+
+  // --- Friendly iframe defaults ---
+  "workbench.startupEditor": "none",
+  "telemetry.telemetryLevel": "off",
+  "update.mode": "none"
+}
