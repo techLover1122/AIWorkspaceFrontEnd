@@ -16,10 +16,13 @@ export type SubscriptionPhase =
   | "spawning"
   | "waiting_url"
   | "browser_opened"
+  | "verifying"
   | "success"
   | "no_subscription"
   | "error"
   | "cancelled";
+
+export type SubscriptionEvent = { t: number; msg: string };
 
 export type SubscriptionStatus = {
   phase: SubscriptionPhase;
@@ -28,7 +31,20 @@ export type SubscriptionStatus = {
   error: string | null;
   /** Captured CLI stdout/stderr — surfaced on error for diagnostics. */
   output?: string;
+  /** Step-by-step log of the sign-in flow — rendered live in the modal. */
+  events?: SubscriptionEvent[];
+  /** True once the CLI has rendered (or is presumed to have rendered) the
+   *  "Paste authorization code:" prompt. */
+  readyForCode?: boolean;
+  /** True if the user pasted a code before the CLI was ready and we have it
+   *  queued. */
+  pendingCode?: boolean;
+  /** Stable id for the current PTY session — changes when a new sign-in
+   *  attempt is started. */
+  sessionId?: string | null;
 };
+
+export type SubmitCodeStatus = "submitted" | "pending" | "nudged" | "error";
 
 const STORAGE_KEY = "aiide.claude-connected";
 
@@ -80,8 +96,13 @@ export type ConnectionStatus = ConnectionState & {
   pollSubscriptionStatus: () => Promise<SubscriptionStatus>;
   /** Kill an in-progress subscription login. */
   cancelSubscriptionLogin: () => Promise<void>;
-  /** Submit the authorization code/key shown by the OAuth page. */
-  submitSubscriptionCode: (code: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Submit the authorization code/key shown by the OAuth page (or empty to continue). */
+  submitSubscriptionCode: (code?: string) => Promise<{
+    ok: boolean;
+    status?: SubmitCodeStatus;
+    message?: string;
+    error?: string;
+  }>;
 };
 
 type ServerResponse = {
@@ -302,16 +323,23 @@ export function useConnectionStatus(): ConnectionStatus {
   }, []);
 
   const submitSubscriptionCode = useCallback(
-    async (code: string): Promise<{ ok: boolean; error?: string }> => {
+    async (
+      code?: string
+    ): Promise<{ ok: boolean; status?: SubmitCodeStatus; message?: string; error?: string }> => {
       try {
         const res = await fetch(subscriptionSubmitCodeUrl(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code }),
+          body: JSON.stringify({ code: code ?? "" }),
         });
-        return (await res.json()) as { ok: boolean; error?: string };
+        return (await res.json()) as {
+          ok: boolean;
+          status?: SubmitCodeStatus;
+          message?: string;
+          error?: string;
+        };
       } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : "Network error" };
+        return { ok: false, status: "error", error: err instanceof Error ? err.message : "Network error" };
       }
     },
     []

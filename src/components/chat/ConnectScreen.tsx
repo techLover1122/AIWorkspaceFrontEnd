@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatedAIBot } from "./AnimatedAIBot";
 import type {
   ConnectionStatus,
   SubscriptionPhase,
-  SubscriptionStatus,
 } from "../../hooks/useConnectionStatus";
 
 type ConnectScreenProps = {
@@ -108,6 +107,15 @@ export function ConnectScreen({ connection }: ConnectScreenProps) {
    clicks "I'm logged in" to re-verify backend status.
    ------------------------------------------------------------------ */
 
+/**
+ * Subscription sign-in via direct OAuth.
+ *
+ * The backend implements the same OAuth 2.0 PKCE flow the Claude CLI does
+ * (extracted from @anthropic-ai/claude-code's cli.js): generate verifier +
+ * challenge + state, build the authorize URL, exchange the pasted code for
+ * tokens via /v1/oauth/token, and write ~/.claude/.credentials.json. No PTY
+ * scripting, no Win32 Input Mode interference — pure HTTP.
+ */
 function SubscriptionModal({
   connection,
   onClose,
@@ -115,126 +123,93 @@ function SubscriptionModal({
   connection: ConnectionStatus;
   onClose: () => void;
 }) {
-  const [sub, setSub] = useState<SubscriptionStatus>({
-    phase: "idle",
-    url: null,
-    urls: [],
-    error: null,
-  });
+  const [phase, setPhase] = useState<SubscriptionPhase>("idle");
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
-  const pollIntervalRef = useRef<number | null>(null);
-  const isTerminal = (p: SubscriptionPhase): boolean =>
-    p === "idle" ||
-    p === "success" ||
-    p === "no_subscription" ||
-    p === "error" ||
-    p === "cancelled";
+  const [copied, setCopied] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
-  // Poll while a login is in progress. Faster cadence (500ms) before the URL
-  // arrives so the UI feels responsive through the two-menu flow. Once the
-  // browser is opened, slow down to 1500ms — we're just waiting on the user.
+  const handleStart = async () => {
+    setError(null);
+    setCodeError(null);
+    setCode("");
+    const s = await connection.startSubscriptionLogin();
+    setPhase(s.phase);
+    setUrl(s.url);
+    setError(s.error ?? null);
+  };
+
+  // After the modal opens, poll backend in case phase changes while we sit
+  // on browser_opened (e.g. user pastes through another tab) or to pick up
+  // a phase transition initiated by /submit-code.
   useEffect(() => {
-    if (isTerminal(sub.phase)) return;
-
-    let consecutiveNetworkErrors = 0;
-
+    if (phase !== "browser_opened" && phase !== "verifying") return;
+    let cancelled = false;
     const tick = async () => {
+      if (cancelled) return;
       const s = await connection.pollSubscriptionStatus();
-      // Swallow transient network errors (backend restarting, etc.) so the
-      // modal doesn't bounce to an error state. After 6 consecutive failures
-      // (~6-18s) surface the error.
-      const isNetworkErr =
-        s.phase === "error" && /network|fetch|refused/i.test(s.error ?? "");
-      if (isNetworkErr) {
-        consecutiveNetworkErrors += 1;
-        if (consecutiveNetworkErrors < 6) return;
-      } else {
-        consecutiveNetworkErrors = 0;
-      }
-      setSub(s);
-      // When CLI succeeds, re-check overall /api/status so the panel can swap
-      // to chat mode.
+      if (cancelled) return;
+      setPhase(s.phase);
+      setUrl(s.url);
+      setError(s.error ?? null);
       if (s.phase === "success") {
         void connection.connect();
       }
     };
-
-    const interval =
-      sub.phase === "browser_opened" ? 1500 : 500;
-    pollIntervalRef.current = window.setInterval(tick, interval);
+    const id = window.setInterval(tick, 1500);
     return () => {
-      if (pollIntervalRef.current !== null) {
-        window.clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
+      cancelled = true;
+      window.clearInterval(id);
     };
-  }, [sub.phase, connection]);
+  }, [phase, connection]);
 
-  const handleStart = async () => {
-    setSub({ phase: "spawning", url: null, urls: [], error: null });
-    const s = await connection.startSubscriptionLogin();
-    setSub(s);
+  const handleVerify = async () => {
+    setCodeError(null);
+    setVerifying(true);
+    const result = await connection.submitSubscriptionCode(code.trim());
+    setVerifying(false);
+    if (!result.ok) {
+      setCodeError(result.error ?? "Failed to verify code.");
+      return;
+    }
+    // Phase transitions are driven by the polling effect above.
+  };
+
+  const handleCopy = async () => {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard may be unavailable in some webviews */
+    }
   };
 
   const handleCancel = async () => {
     await connection.cancelSubscriptionLogin();
-    setSub({ phase: "cancelled", url: null, urls: [], error: null });
+    setPhase("cancelled");
+    setUrl(null);
   };
 
-  const handleCopy = async (url: string) => {
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(url);
-      setTimeout(() => setCopied(null), 2000);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const [verifying, setVerifying] = useState(false);
-  const [codeSubmitted, setCodeSubmitted] = useState(false);
-
-  const handleVerify = async () => {
-    setCodeError(null);
-    const trimmed = code.trim();
-    if (!trimmed) {
-      setCodeError("Paste the code from the sign-in page first.");
-      return;
-    }
-    setVerifying(true);
-    const result = await connection.submitSubscriptionCode(trimmed);
-    setVerifying(false);
-    if (!result.ok) {
-      setCodeError(result.error ?? "Failed to submit code.");
-    } else {
-      setCodeSubmitted(true);
-    }
-  };
-
-  const showStartButton = sub.phase === "idle";
-  const showSpinner = sub.phase === "spawning" || sub.phase === "waiting_url";
-  const showUrlReady = sub.phase === "browser_opened";
-  const showSuccess = sub.phase === "success";
-  const showNoSubscription = sub.phase === "no_subscription";
-  const showError = sub.phase === "error" || sub.phase === "cancelled";
-
-  const spinnerLabel =
-    sub.phase === "spawning" ? "Starting Claude CLI…" : "Generating sign-in URL…";
-
-  // Which URLs to display — all captured ones (last = key-returning URL)
-  const urlList =
-    sub.urls && sub.urls.length > 0 ? sub.urls : sub.url ? [sub.url] : [];
+  const showIdle = phase === "idle" || phase === "cancelled";
+  const showUrlReady = phase === "browser_opened";
+  const showVerifying = phase === "verifying";
+  const showSuccess = phase === "success";
+  const showNoSubscription = phase === "no_subscription";
+  const showError = phase === "error";
 
   return (
     <ModalShell title="Sign in with Claude.ai" onClose={onClose}>
-      {showStartButton && (
+      {showIdle && (
         <>
           <p>
-            We&apos;ll run <code>claude login</code> on the backend and
-            generate a sign-in URL for you. Make sure you have a Claude
-            Pro / Max / Team subscription on the account you sign in with.
+            We&apos;ll generate a sign-in URL — open it in your browser, sign
+            in with your Claude account, and paste the code shown on
+            platform.claude.com back here. Make sure your account has a
+            Claude Pro / Max / Team plan attached.
           </p>
           <button
             type="button"
@@ -246,51 +221,33 @@ function SubscriptionModal({
         </>
       )}
 
-      {/* Step 1 — waiting for URL */}
-      {showSpinner && (
-        <div className="sub-progress">
-          <span className="connect-spinner" aria-hidden />
-          <span>{spinnerLabel}</span>
-        </div>
-      )}
-
-      {/* Step 2 — URL ready: show copy field + code entry */}
-      {showUrlReady && (
+      {showUrlReady && url && (
         <div className="sub-flow">
-          {/* URL fields */}
-          {urlList.map((u, i) => {
-            const isLast = i === urlList.length - 1;
-            return (
-              <div key={u} className="sub-url-block">
-                <p className="sub-url-label">
-                  {urlList.length > 1
-                    ? (isLast ? "Copy this URL and open in browser:" : `URL ${i + 1}:`)
-                    : "Copy this URL and open in your browser:"}
-                </p>
-                <div className="sub-url-row">
-                  <input
-                    type="text"
-                    readOnly
-                    className="connect-modal-input sub-url-input"
-                    value={u}
-                    onClick={(e) => (e.target as HTMLInputElement).select()}
-                  />
-                  <button
-                    type="button"
-                    className="sub-url-copy"
-                    onClick={() => void handleCopy(u)}
-                  >
-                    {copied === u ? "Copied!" : "Copy"}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+          <div className="sub-url-block">
+            <p className="sub-url-label">
+              Copy this URL and open it in your browser:
+            </p>
+            <div className="sub-url-row">
+              <input
+                type="text"
+                readOnly
+                className="connect-modal-input sub-url-input"
+                value={url}
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+              />
+              <button
+                type="button"
+                className="sub-url-copy"
+                onClick={() => void handleCopy()}
+              >
+                {copied ? "Copied!" : "Copy"}
+              </button>
+            </div>
+          </div>
 
-          {/* Code entry */}
           <div className="sub-code-block">
             <p className="sub-url-label">
-              After authorizing, paste the code shown on platform.claude.com:
+              After signing in, paste the code shown on platform.claude.com:
             </p>
             <div className="sub-url-row">
               <input
@@ -298,8 +255,13 @@ function SubscriptionModal({
                 className="connect-modal-input sub-url-input"
                 placeholder="Paste authorization code…"
                 value={code}
-                onChange={(e) => { setCode(e.target.value); setCodeError(null); }}
-                onKeyDown={(e) => { if (e.key === "Enter") void handleVerify(); }}
+                onChange={(e) => {
+                  setCode(e.target.value);
+                  setCodeError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleVerify();
+                }}
                 spellCheck={false}
                 autoComplete="off"
                 disabled={verifying}
@@ -308,27 +270,25 @@ function SubscriptionModal({
                 type="button"
                 className="connect-modal-primary sub-verify-btn"
                 onClick={() => void handleVerify()}
-                disabled={!code.trim() || verifying}
+                disabled={verifying || !code.trim()}
               >
-                {verifying ? <><span className="connect-spinner" aria-hidden /> Verifying…</> : "Verify"}
+                {verifying ? (
+                  <>
+                    <span className="connect-spinner" aria-hidden /> Verifying…
+                  </>
+                ) : (
+                  "Verify"
+                )}
               </button>
             </div>
             {codeError && (
               <p className="connect-modal-error sub-code-error">{codeError}</p>
             )}
-            {codeSubmitted && !codeError && (
-              <div className="sub-progress" style={{ marginTop: 8 }}>
-                <span className="connect-spinner" aria-hidden />
-                <span>Code received — completing sign-in…</span>
-              </div>
+            {error && !codeError && (
+              <p className="connect-modal-error sub-code-error">{error}</p>
             )}
           </div>
 
-          {!codeSubmitted && (
-            <p className="connect-modal-foot sub-waiting-note">
-              Or just sign in via the browser — this screen will update automatically.
-            </p>
-          )}
           <button
             type="button"
             className="connect-modal-cancel"
@@ -339,13 +299,23 @@ function SubscriptionModal({
         </div>
       )}
 
+      {showVerifying && (
+        <div className="sub-progress">
+          <span className="connect-spinner" aria-hidden />
+          <span>Exchanging code with Anthropic…</span>
+        </div>
+      )}
+
       {showSuccess && (
         <>
-          <p className="sub-success">✓ Logged in successfully</p>
+          <p className="sub-success">✓ Claude connected successfully</p>
           <button
             type="button"
             className="connect-modal-primary"
-            onClick={onClose}
+            onClick={() => {
+              void connection.connect();
+              onClose();
+            }}
           >
             Continue
           </button>
@@ -366,8 +336,7 @@ function SubscriptionModal({
             </p>
             <p className="sub-no-subscription-body">
               You can either upgrade your account, or sign in with an{" "}
-              <strong>API key</strong> from console.anthropic.com instead
-              (pay-per-use).
+              <strong>API key</strong> from console.anthropic.com instead.
             </p>
           </div>
           <div className="sub-error-actions">
@@ -387,31 +356,12 @@ function SubscriptionModal({
               Close
             </button>
           </div>
-          {sub.output && (
-            <details className="sub-output-details">
-              <summary>Show CLI output</summary>
-              <pre className="sub-output-pre">{sub.output}</pre>
-            </details>
-          )}
         </>
       )}
 
       {showError && (
         <>
-          <p className="connect-modal-error">
-            {sub.error ?? (sub.phase === "cancelled" ? "Cancelled" : "Login failed")}
-          </p>
-          {sub.output && (
-            <details className="sub-output-details">
-              <summary>Show CLI output</summary>
-              <pre className="sub-output-pre">{sub.output}</pre>
-            </details>
-          )}
-          <p className="connect-modal-foot">
-            You can retry, or run <code>claude login</code> manually in a
-            terminal and then click <em>Retry connection</em> from the main
-            screen.
-          </p>
+          <p className="connect-modal-error">{error ?? "Sign-in failed."}</p>
           <div className="sub-error-actions">
             <button
               type="button"
