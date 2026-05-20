@@ -2,6 +2,7 @@
 
 import { DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { createInitialTabs } from "../../constant/constants";
+import { WorkspaceTabContext } from "../../contexts/WorkspaceTabContext";
 import { ChatPanel } from "./chat-panel";
 import { EditorTabs } from "./editor-tabs";
 import { PreviewPane } from "./preview-pane";
@@ -61,18 +62,40 @@ export function WorkspaceShell({
     setTabs((currentTabs) => moveItem(currentTabs, sourceIndex, targetIndex));
   };
 
+  // "+" button → open a blank new tab showing the new tab page
   const handleAddTab = () => {
     setTabs((currentTabs) => {
-      const nextIndex = currentTabs.length + 1;
       const nextTab: EditorTab = {
-        id: `vscode-${Date.now()}`,
-        label: `VS Code ${nextIndex}`,
-        url: codeServerUrl,
+        id: `tab-${Date.now()}`,
+        label: "New Tab",
+        url: "",
       };
       setActiveTabId(nextTab.id);
       return [...currentTabs, nextTab];
     });
   };
+
+  // Called when user picks a URL from inside the new tab page
+  const handleTabNavigate = useCallback((tabId: string, url: string, label: string) => {
+    setTabs((prev) =>
+      prev.map((t) => (t.id === tabId ? { ...t, url, label } : t))
+    );
+  }, []);
+
+  // Called from chat (via WorkspaceTabContext) — opens a URL in a new tab,
+  // or switches to it if already open.
+  const handleOpenTab = useCallback((url: string, label: string) => {
+    setTabs((currentTabs) => {
+      const existing = currentTabs.find((t) => t.url === url);
+      if (existing) {
+        setActiveTabId(existing.id);
+        return currentTabs;
+      }
+      const nextTab: EditorTab = { id: `tab-${Date.now()}`, label, url };
+      setActiveTabId(nextTab.id);
+      return [...currentTabs, nextTab];
+    });
+  }, []);
 
   const handleCloseTab = (tabId: string) => {
     setTabs((currentTabs) => {
@@ -192,6 +215,7 @@ export function WorkspaceShell({
   }, []);
 
   return (
+    <WorkspaceTabContext.Provider value={{ openTab: handleOpenTab }}>
     <main className="app-shell">
       <section className="workspace-frame">
         <section
@@ -215,7 +239,12 @@ export function WorkspaceShell({
               onGroupRename={handleGroupRename}
             />
             <div className="editor-body">
-              <PreviewPane codeServerUrl={activeTab.url} />
+              <PreviewPane
+                tabId={activeTab.id}
+                url={activeTab.url}
+                codeServerUrl={codeServerUrl}
+                onNavigate={handleTabNavigate}
+              />
             </div>
           </section>
 
@@ -236,5 +265,6 @@ export function WorkspaceShell({
         </section>
       </section>
     </main>
+    </WorkspaceTabContext.Provider>
   );
 }

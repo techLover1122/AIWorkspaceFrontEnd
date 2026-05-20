@@ -22,6 +22,46 @@ import { ConnectScreen } from "../chat/ConnectScreen";
 import { ConnectionCheckLoader } from "../chat/ConnectionCheckLoader";
 import { ProjectSelector } from "../project/ProjectSelector";
 import { useConnectionStatus } from "../../hooks/useConnectionStatus";
+import { useWorkspaceTab } from "../../contexts/WorkspaceTabContext";
+
+/** Returns { url, label } if the message is a "open X at port N" command. */
+function detectTabOpenCommand(msg: string): { url: string; label: string } | null {
+  const lower = msg.toLowerCase();
+  const openWords = ["open", "launch", "start", "show", "kholo", "khol", "chalao", "chala", "tab"];
+  if (!openWords.some((w) => lower.includes(w))) return null;
+
+  // Match: "port 3006", "localhost:3006", ":3006", or bare "3006" when near "open"
+  const portRe = /\bport\s+(\d{2,5})\b|localhost:(\d{2,5})|:(\d{2,5})\b|(?:^|\s)(\d{4,5})(?:\s|$)/i;
+  const m = msg.match(portRe);
+  if (!m) return null;
+  const port = m[1] ?? m[2] ?? m[3] ?? m[4];
+  const num = parseInt(port ?? "0", 10);
+  if (!port || num < 1024 || num > 65535) return null;
+
+  const appMap: [string, string][] = [
+    ["react", "React"],
+    ["next", "Next.js"],
+    ["vue", "Vue"],
+    ["nuxt", "Nuxt"],
+    ["angular", "Angular"],
+    ["svelte", "Svelte"],
+    ["vite", "Vite"],
+    ["node", "Node.js"],
+    ["express", "Express"],
+    ["django", "Django"],
+    ["flask", "Flask"],
+    ["fastapi", "FastAPI"],
+    ["rails", "Rails"],
+    ["laravel", "Laravel"],
+    ["spring", "Spring"],
+  ];
+  let appLabel = "";
+  for (const [key, name] of appMap) {
+    if (lower.includes(key)) { appLabel = name; break; }
+  }
+  const label = appLabel ? `${appLabel} :${port}` : `localhost:${port}`;
+  return { url: `http://localhost:${port}`, label };
+}
 
 type ChatPanelProps = {
   workingDirectory?: string;
@@ -29,6 +69,7 @@ type ChatPanelProps = {
 };
 
 export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps) {
+  const tabCtx = useWorkspaceTab();
   const {
     state,
     addMessage,
@@ -86,6 +127,20 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
           .join("\n");
       }
       if (!composed.trim()) return;
+
+      // Direct tab-open command — handle instantly, skip Claude.
+      const tabCmd = detectTabOpenCommand(composed);
+      if (tabCmd && tabCtx) {
+        tabCtx.openTab(tabCmd.url, tabCmd.label);
+        addMessage(createUserMessage(composed));
+        addMessage({
+          id: `sys_${Date.now()}`,
+          type: "system",
+          content: `Opened ${tabCmd.label} → ${tabCmd.url}`,
+          timestamp: Date.now(),
+        });
+        return;
+      }
 
       const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 

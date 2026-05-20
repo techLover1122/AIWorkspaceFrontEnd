@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../../types/types";
+import { useWorkspaceTab } from "../../contexts/WorkspaceTabContext";
 import { AnimatedAIBot } from "./AnimatedAIBot";
 import { MarkdownContent } from "./MarkdownContent";
 import {
@@ -9,6 +10,49 @@ import {
   formatToolArguments,
   prettyToolInput,
 } from "../../utils/toolUtils";
+
+/** Extract unique localhost URLs from Claude's text response. */
+function extractLocalhostUrls(text: string): { url: string; port: string }[] {
+  const regex = /https?:\/\/localhost:(\d{2,5})(?:\/[^\s)>\]"']*)?/g;
+  const seen = new Set<string>();
+  const results: { url: string; port: string }[] = [];
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const base = `http://localhost:${match[1]}`;
+    if (!seen.has(base)) {
+      seen.add(base);
+      results.push({ url: base, port: match[1] });
+    }
+  }
+  return results;
+}
+
+function OpenTabChips({ content }: { content: string }) {
+  const ctx = useWorkspaceTab();
+  if (!ctx) return null;
+  const urls = extractLocalhostUrls(content);
+  if (urls.length === 0) return null;
+  return (
+    <div className="msg-open-tab-chips">
+      {urls.map(({ url, port }) => (
+        <button
+          key={url}
+          type="button"
+          className="msg-open-tab-chip"
+          onClick={() => ctx.openTab(url, `localhost:${port}`)}
+          title={`Open ${url} in a new tab`}
+        >
+          <svg viewBox="0 0 14 14" width="12" height="12" fill="none" aria-hidden>
+            <rect x="1" y="3" width="9" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+            <path d="M6 1h7v7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M8 1l5 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          </svg>
+          Open :{port}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 type ChatMessagesProps = {
   messages: ChatMessage[];
@@ -65,6 +109,9 @@ function Message({
             content={message.content}
             streaming={message.isStreaming}
           />
+          {!message.isStreaming && (
+            <OpenTabChips content={message.content} />
+          )}
         </div>
       );
 

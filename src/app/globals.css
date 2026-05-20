@@ -3138,3 +3138,236 @@ button {
   color: var(--vsc-success);
   font-family: var(--font-mono);
 }
+
+/* ===== Open-in-tab chips (below Claude messages with localhost URLs) ===== */
+
+.msg-open-tab-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 0 2px;
+}
+
+.msg-open-tab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px 4px 8px;
+  background: rgba(0, 122, 204, 0.1);
+  border: 1px solid rgba(0, 122, 204, 0.3);
+  border-radius: 999px;
+  color: var(--vsc-text-link);
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+}
+
+.msg-open-tab-chip:hover {
+  background: rgba(0, 122, 204, 0.2);
+  border-color: var(--vsc-accent);
+  transform: translateY(-1px);
+}
+
+/* ===== New Tab Page (in-tab, full area) ===== */
+
+.ntp-root {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vsc-bg);
+  padding: 32px 24px;
+}
+
+.ntp-inner {
+  width: 100%;
+  max-width: 580px;
+}
+
+/* VS Code primary card */
+.ntp-vscode-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  background: rgba(0, 122, 204, 0.08);
+  border: 1px solid rgba(0, 122, 204, 0.35);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--vsc-text);
+  transition: background 120ms ease, border-color 120ms ease, transform 100ms ease;
+  margin-bottom: 16px;
+}
+
+.ntp-vscode-card:hover {
+  background: rgba(0, 122, 204, 0.15);
+  border-color: var(--vsc-accent);
+  transform: translateY(-1px);
+}
+
+.ntp-vscode-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ntp-vscode-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ntp-vscode-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vsc-text-emphasis);
+}
+
+.ntp-vscode-url {
+  font-size: 11px;
+  color: var(--vsc-text-dim);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ntp-vscode-arrow {
+  color: var(--vsc-accent);
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+/* URL bar */
+.ntp-urlbar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--vsc-input-bg);
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 8px;
+  padding: 0 0 0 12px;
+  margin-bottom: 24px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.ntp-urlbar-wrap:focus-within {
+  border-color: var(--vsc-accent);
+  box-shadow: 0 0 0 1px var(--vsc-accent-soft);
+}
+
+.ntp-urlbar-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--vsc-text-dim);
+  flex-shrink: 0;
+}
+
+.ntp-urlbar-input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--vsc-text-emphasis);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 11px 10px;
+  min-width: 0;
+}
+
+.ntp-urlbar-input::placeholder {
+  color: var(--vsc-text-dim);
+  font-family: var(--font-ui);
+}
+
+.ntp-urlbar-go {
+  flex-shrink: 0;
+  background: var(--vsc-accent);
+  border: 0;
+  border-radius: 0 7px 7px 0;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 16px;
+  height: 100%;
+  min-height: 40px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.ntp-urlbar-go:hover:not(:disabled) {
+  background: var(--vsc-accent-hover);
+}
+
+.ntp-urlbar-go:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Section label */
+.ntp-section-label {
+  font-size: 10.5px;
+  color: var(--vsc-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 8px;
+}
+
+/* Preset grid */
+.ntp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.ntp-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 12px;
+  background: var(--vsc-panel);
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--vsc-text);
+  transition: background 120ms ease, border-color 120ms ease, transform 100ms ease;
+}
+
+.ntp-card:hover {
+  background: var(--vsc-hover);
+  border-color: var(--ntp-card-accent, var(--vsc-accent));
+  transform: translateY(-2px);
+}
+
+.ntp-card-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.ntp-card-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vsc-text-emphasis);
+}
+
+.ntp-card-port {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--ntp-card-accent, var(--vsc-text-link));
+}
+
+.ntp-card-desc {
+  font-size: 10.5px;
+  color: var(--vsc-text-dim);
+  line-height: 1.3;
+}
