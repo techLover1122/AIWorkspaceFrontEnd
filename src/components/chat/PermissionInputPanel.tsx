@@ -44,6 +44,14 @@ export function PermissionInputPanel({ request, onAllow, onDeny }: PermissionInp
     }
   };
 
+  // Prefer the SDK-provided pre-rendered prompt; fall back to a synthesized
+  // sentence from toolName + blockedPath when not available.
+  const title =
+    request.title ??
+    (request.blockedPath
+      ? `Claude wants to use ${request.displayName ?? request.toolName} on ${request.blockedPath}`
+      : `Claude wants to use ${request.displayName ?? request.toolName}`);
+
   return (
     <div className="permission-panel" ref={ref} tabIndex={0} onKeyDown={handleKey}>
       <div className="permission-header">
@@ -60,7 +68,18 @@ export function PermissionInputPanel({ request, onAllow, onDeny }: PermissionInp
         </span>
         <span className="permission-title">Tool permission required</span>
       </div>
-      <div className="permission-detail">{request.toolName}</div>
+      <div className="permission-detail">{title}</div>
+      {request.description && (
+        <div className="permission-description">{request.description}</div>
+      )}
+      {request.blockedPath && request.blockedPath !== request.title && (
+        <div className="permission-path" title={request.blockedPath}>
+          {request.blockedPath}
+        </div>
+      )}
+      {request.decisionReason && (
+        <div className="permission-reason">{request.decisionReason}</div>
+      )}
       <div className="permission-actions">
         {options.map((opt, i) => (
           <button

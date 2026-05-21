@@ -355,12 +355,20 @@ export function WorkspaceShell({
               onGroupRename={handleGroupRename}
               />
             <div className="editor-body">
-              <PreviewPane
-                tabId={activeTab.id}
-                url={activeTab.url}
-                codeServerUrl={codeServerUrl}
-                onNavigate={handleTabNavigate}
-              />
+              {/* Render every tab simultaneously and hide non-active ones via
+                  `display:none` (handled inside PreviewPane). Keeps iframes
+                  and any in-page state mounted across tab switches so the
+                  user doesn't see a full reload when returning to a tab. */}
+              {tabs.map((tab) => (
+                <PreviewPane
+                  key={tab.id}
+                  tabId={tab.id}
+                  url={tab.url}
+                  codeServerUrl={codeServerUrl}
+                  isActive={tab.id === activeTab.id}
+                  onNavigate={handleTabNavigate}
+                />
+              ))}
             </div>
           </section>
 

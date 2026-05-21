@@ -1693,10 +1693,36 @@ button {
 }
 
 .permission-detail {
-  margin: 4px 0 8px;
-  font-family: var(--font-mono);
+  margin: 4px 0 6px;
+  font-size: 12px;
+  color: var(--vsc-text);
+  line-height: 1.4;
+}
+
+.permission-description {
+  margin: 0 0 6px;
   font-size: 11px;
   color: var(--vsc-text-muted);
+  line-height: 1.4;
+}
+
+.permission-path {
+  margin: 0 0 6px;
+  font-family: var(--vsc-font-mono, ui-monospace, "Cascadia Mono", Menlo, monospace);
+  font-size: 11px;
+  color: var(--vsc-text-muted);
+  background: var(--vsc-tab-inactive);
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 2px;
+  padding: 3px 6px;
+  word-break: break-all;
+}
+
+.permission-reason {
+  margin: 0 0 8px;
+  font-size: 10.5px;
+  color: var(--vsc-text-dim, var(--vsc-text-muted));
+  font-style: italic;
 }
 
 .permission-actions {
@@ -3864,5 +3890,159 @@ button {
   border: 1px solid var(--vsc-border-strong);
   border-radius: 2px;
   padding: 0 4px;
+}
+
+/* ============================================================
+   AskUserQuestion modal — Claude asking a multi-choice question
+   ============================================================ */
+
+.auq-panel {
+  max-width: 560px;
+}
+
+.auq-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.auq-question {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auq-question-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.auq-question-chip {
+  display: inline-block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--vsc-tab-inactive);
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 3px;
+  padding: 2px 6px;
+  color: var(--vsc-text-muted);
+}
+
+.auq-question-text {
+  font-size: 13px;
+  color: var(--vsc-text);
+  flex: 1;
+  min-width: 0;
+}
+
+.auq-question-multi {
+  font-size: 10px;
+  color: var(--vsc-text-muted);
+  font-style: italic;
+}
+
+.auq-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.auq-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 4px;
+  padding: 8px 10px;
+  color: var(--vsc-text);
+  cursor: pointer;
+  font: inherit;
+  width: 100%;
+}
+
+.auq-option:hover {
+  background: var(--vsc-hover);
+}
+
+.auq-option.picked {
+  border-color: var(--vsc-accent, #0e639c);
+  background: rgba(14, 99, 156, 0.12);
+}
+
+.auq-option-marker {
+  font-size: 12px;
+  line-height: 1.2;
+  margin-top: 2px;
+  color: var(--vsc-text-muted);
+}
+
+.auq-option.picked .auq-option-marker {
+  color: var(--vsc-accent, #0e639c);
+}
+
+.auq-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.auq-option-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--vsc-text);
+}
+
+.auq-option-desc {
+  font-size: 11px;
+  color: var(--vsc-text-muted);
+  line-height: 1.4;
+}
+
+.auq-other {
+  font-style: italic;
+}
+
+.auq-other-input {
+  background: var(--vsc-input, #1e1e1e);
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 3px;
+  color: var(--vsc-text);
+  padding: 6px 8px;
+  font-size: 12px;
+  outline: none;
+}
+
+.auq-other-input:focus {
+  border-color: var(--vsc-accent, #0e639c);
+}
+
+.auq-preview {
+  background: var(--vsc-tab-inactive);
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 3px;
+  padding: 8px 10px;
+  margin: 0;
+  font-family: var(--vsc-font-mono, ui-monospace, "Cascadia Mono", Menlo, monospace);
+  font-size: 11px;
+  color: var(--vsc-text);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.auq-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }
 

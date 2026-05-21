@@ -1,10 +1,15 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import type { ChatMessage, PermissionMode, PermissionRequest } from "../../types/types";
+import type {
+  AskUserQuestionRequest,
+  ChatMessage,
+  PermissionMode,
+  PermissionRequest,
+} from "../../types/types";
 import { useClaudeStreaming } from "../../hooks/useClaudeStreaming";
 import { useChatState, createUserMessage } from "../../hooks/useChatState";
-import { conversationUrl, portScanUrl } from "../../constant/api";
+import { conversationUrl, permissionDecisionUrl, portScanUrl } from "../../constant/api";
 import { convertHistoryMessages } from "../../utils/messageConverter";
 import { ChatMessages } from "../chat/ChatMessages";
 import {
@@ -17,6 +22,7 @@ import { PermissionInputPanel } from "../chat/PermissionInputPanel";
 import { PlanPermissionInputPanel } from "../chat/PlanPermissionInputPanel";
 import { HistoryView } from "../chat/HistoryView";
 import { EnvironmentPackModal, type InstalledPack } from "../chat/EnvironmentPackModal";
+import { AskUserQuestionModal } from "../chat/AskUserQuestionModal";
 import { MiniBot } from "../chat/MiniBot";
 import { TypingIndicator } from "../chat/AnimatedAIBot";
 import { ConnectScreen } from "../chat/ConnectScreen";
@@ -55,12 +61,12 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
   const { send, abort } = useClaudeStreaming();
 
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
-  const [allowedTools, setAllowedTools] = useState<string[]>([]);
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const [planRequest, setPlanRequest] = useState<PermissionRequest | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
+  const [askQuestion, setAskQuestion] = useState<AskUserQuestionRequest | null>(null);
   const chatInputRef = useRef<ChatInputHandle>(null);
 
   const connection = useConnectionStatus();
@@ -84,12 +90,39 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
       onAppend: (chunk: string) => appendToLastMessage(chunk),
       onFinalize: () => finalizeLastMessage(),
       onSessionId: (id: string) => setSessionId(id),
-      onPermissionError: (req: PermissionRequest) => {
+      onPermissionRequest: (req: PermissionRequest) => {
         if (req.isPlanMode) {
           setPlanRequest(req);
         } else {
           setPermissionRequest(req);
         }
+      },
+      onAskUserQuestion: (req: AskUserQuestionRequest) => {
+        // eslint-disable-next-line no-console
+        console.log("[askUserQuestion:modal-open]", {
+          toolUseId: req.toolUseId,
+          questionCount: req.questions.length,
+          aborting: state.currentRequestId,
+        });
+        addMessage({
+          id: `sys_${Date.now()}`,
+          type: "system",
+          content:
+            `Claude is asking you ${req.questions.length} question` +
+            `${req.questions.length === 1 ? "" : "s"} ` +
+            `(tool_use_id: ${req.toolUseId.slice(0, 12)}…). ` +
+            `Opening the answer modal and aborting the in-flight stream so ` +
+            `Claude doesn't fallback to plain text in parallel.`,
+          timestamp: Date.now(),
+        });
+        // Abort the in-flight stream so Claude doesn't get a chance to
+        // respond to the SDK auto-error before the user answers.
+        if (state.currentRequestId) {
+          void abort(state.currentRequestId);
+        }
+        setLoading(false);
+        setCurrentRequestId(null);
+        setAskQuestion(req);
       },
       onDone: () => {
         setLoading(false);
@@ -106,7 +139,7 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
         setCurrentRequestId(null);
       },
     }),
-    [addMessage, appendToLastMessage, finalizeLastMessage, setSessionId, setLoading, setCurrentRequestId]
+    [addMessage, appendToLastMessage, finalizeLastMessage, setSessionId, setLoading, setCurrentRequestId, state.currentRequestId, abort]
   );
 
   const fetchAndShowPorts = useCallback(async () => {
@@ -197,7 +230,6 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
           message: composed,
           requestId,
           sessionId: state.sessionId ?? undefined,
-          allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
           workingDirectory,
           permissionMode,
         },
@@ -207,7 +239,6 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
     [
       state.isLoading,
       state.sessionId,
-      allowedTools,
       workingDirectory,
       permissionMode,
       send,
@@ -217,6 +248,46 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
       tabCtx,
     ]
   );
+
+  const handleAskUserQuestionSubmit = useCallback(
+    (answers: Record<string, string>) => {
+      const lines = Object.entries(answers).map(
+        ([q, a]) => `- ${q}\n  → ${a}`
+      );
+      const message =
+        `Here are my answers to your question${lines.length === 1 ? "" : "s"}:\n\n` +
+        lines.join("\n") +
+        `\n\nPlease continue.`;
+      // eslint-disable-next-line no-console
+      console.log("[askUserQuestion:submit]", {
+        answers,
+        messagePreview: message.slice(0, 200),
+      });
+      addMessage({
+        id: `sys_${Date.now()}`,
+        type: "system",
+        content:
+          `Submitting answer${lines.length === 1 ? "" : "s"} to Claude:\n` +
+          lines.join("\n"),
+        timestamp: Date.now(),
+      });
+      setAskQuestion(null);
+      handleSend(message, []);
+    },
+    [handleSend, addMessage]
+  );
+
+  const handleAskUserQuestionCancel = useCallback(() => {
+    // eslint-disable-next-line no-console
+    console.log("[askUserQuestion:cancel]");
+    addMessage({
+      id: `sys_${Date.now()}`,
+      type: "system",
+      content: "Question modal cancelled. Send a follow-up message to continue.",
+      timestamp: Date.now(),
+    });
+    setAskQuestion(null);
+  }, [addMessage]);
 
   const handlePackInstalled = useCallback(
     (pack: InstalledPack) => {
@@ -249,93 +320,96 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
   }, []);
 
   const handlePermissionAllow = useCallback(
-    (persist: boolean) => {
+    async (persist: boolean) => {
       if (!permissionRequest) return;
-
-      // "Allow once" was a no-op before — it left allowedTools untouched, so
-      // the SDK auto-denied the tool again on the next turn. Add the tool to
-      // updatedTools for this request either way; only commit to React state
-      // when the user picked "Allow permanently".
-      const updatedTools = Array.from(
-        new Set([...allowedTools, permissionRequest.toolName])
-      );
-
-      if (persist) setAllowedTools(updatedTools);
+      const req = permissionRequest;
       setPermissionRequest(null);
 
-      // The SDK's file-editing tools (Write/Edit/MultiEdit/NotebookEdit) have
-      // a per-path permission gate that bare allowedTools does NOT satisfy —
-      // even after granting "Write", subsequent calls return
-      //   "Claude requested permissions to write to X, but you haven't granted it yet"
-      // Bumping permissionMode to "acceptEdits" tells the SDK to auto-approve
-      // edits when the tool is in the allowlist. We only bump when the user
-      // picked Allow Permanently AND the current mode is "default" — that
-      // matches user intent without surprising anyone using stricter modes.
-      const EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
-      const shouldBumpMode =
-        persist &&
-        permissionMode === "default" &&
-        EDIT_TOOLS.has(permissionRequest.toolName);
-      const effectiveMode: PermissionMode = shouldBumpMode
-        ? "acceptEdits"
-        : permissionMode;
-      if (shouldBumpMode) setPermissionMode("acceptEdits");
+      // "Allow permanently" pipes the SDK-provided permission `suggestions`
+      // back as `updatedPermissions` — the SDK persists them properly. We
+      // don't maintain our own allow-list anymore (the bare allowedTools
+      // approach never satisfied per-path / compound-Bash gates anyway).
+      const body =
+        persist && req.suggestions && req.suggestions.length > 0
+          ? { behavior: "allow", updatedPermissions: req.suggestions }
+          : { behavior: "allow" };
 
-      const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      setCurrentRequestId(requestId);
-      setLoading(true);
-
-      const debugPayload = {
-        action: "permission_allow",
-        tool: permissionRequest.toolName,
-        persist,
-        toolUseId: permissionRequest.toolUseId,
-        updatedTools,
-        sessionId: state.sessionId,
-        permissionMode: effectiveMode,
-        modeBumped: shouldBumpMode,
-        requestId,
-      };
       // eslint-disable-next-line no-console
-      console.log("[allow]", debugPayload);
-      const modeNote = shouldBumpMode
-        ? `\nSwitched permission mode to "auto" (acceptEdits) — file-editing tools have a per-path gate that bare allowedTools doesn't satisfy.`
-        : "";
+      console.log("[permission:allow]", {
+        id: req.id,
+        tool: req.toolName,
+        toolUseId: req.toolUseId,
+        persist,
+        suggestionCount: req.suggestions?.length ?? 0,
+      });
       addMessage({
         id: `sys_${Date.now()}`,
         type: "system",
         content:
-          `Allowing ${permissionRequest.toolName} ${persist ? "permanently" : "for this turn"}` +
-          ` and sending "continue" to resume session ${state.sessionId?.slice(0, 8) ?? "(new)"}.\n` +
-          `Allowed tools after: [${updatedTools.join(", ")}]` +
-          modeNote,
+          `Allowing ${req.displayName ?? req.toolName} ` +
+          `${persist ? "permanently" : "for this turn"}.`,
         timestamp: Date.now(),
       });
 
-      send(
-        {
-          message: "continue",
-          requestId,
-          sessionId: state.sessionId ?? undefined,
-          allowedTools: updatedTools.length > 0 ? updatedTools : undefined,
-          workingDirectory,
-          permissionMode: effectiveMode,
-        },
-        streamCallbacks()
-      );
+      try {
+        const res = await fetch(permissionDecisionUrl(req.id), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          addMessage({
+            id: `err_${Date.now()}`,
+            type: "error",
+            content: `Failed to send permission decision (HTTP ${res.status}). The pending tool call may hang.`,
+            timestamp: Date.now(),
+          });
+        }
+      } catch (err) {
+        addMessage({
+          id: `err_${Date.now()}`,
+          type: "error",
+          content: `Failed to send permission decision: ${err instanceof Error ? err.message : String(err)}`,
+          timestamp: Date.now(),
+        });
+      }
     },
-    [permissionRequest, allowedTools, state.sessionId, workingDirectory, permissionMode, send, streamCallbacks, setAllowedTools, setPermissionMode, setCurrentRequestId, setLoading, addMessage]
+    [permissionRequest, addMessage]
   );
 
-  const handlePermissionDeny = useCallback(() => {
+  const handlePermissionDeny = useCallback(async () => {
+    if (!permissionRequest) return;
+    const req = permissionRequest;
     setPermissionRequest(null);
+
+    // eslint-disable-next-line no-console
+    console.log("[permission:deny]", {
+      id: req.id,
+      tool: req.toolName,
+      toolUseId: req.toolUseId,
+    });
     addMessage({
       id: `sys_${Date.now()}`,
       type: "system",
-      content: "Permission denied by user",
+      content: `Denied ${req.displayName ?? req.toolName} — Claude will try a different approach.`,
       timestamp: Date.now(),
     });
-  }, [addMessage]);
+
+    try {
+      await fetch(permissionDecisionUrl(req.id), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ behavior: "deny", message: "Denied by user" }),
+      });
+    } catch (err) {
+      addMessage({
+        id: `err_${Date.now()}`,
+        type: "error",
+        content: `Failed to send deny decision: ${err instanceof Error ? err.message : String(err)}`,
+        timestamp: Date.now(),
+      });
+    }
+  }, [permissionRequest, addMessage]);
 
   const handlePlanAcceptAuto = useCallback(() => {
     setPermissionMode("acceptEdits");
@@ -520,6 +594,12 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
         onClose={() => setShowPackModal(false)}
         onInstalled={handlePackInstalled}
         onCreateRequest={(message) => handleSend(message, [])}
+      />
+
+      <AskUserQuestionModal
+        request={askQuestion}
+        onCancel={handleAskUserQuestionCancel}
+        onSubmit={handleAskUserQuestionSubmit}
       />
 
       {showProjectPicker && onChangeProject && (

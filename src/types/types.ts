@@ -32,7 +32,7 @@ export type ChatMessage = {
 };
 
 export type StreamResponse = {
-  type: "claude_json" | "error" | "done" | "aborted";
+  type: "claude_json" | "error" | "done" | "aborted" | "permission_request";
   data?: unknown;
   error?: string;
 };
@@ -59,11 +59,53 @@ export type ConversationSummary = {
   lastMessagePreview: string;
 };
 
+/** Mirrors the SDK's PermissionUpdate shape (kept loose to avoid pulling
+ *  the SDK types into the frontend bundle). */
+export type PermissionUpdate = Record<string, unknown>;
+
+/** Structured permission request emitted by the backend's canUseTool
+ *  callback. Replaces the old regex-derived shape. */
 export type PermissionRequest = {
+  /** Server-side id used when POSTing the decision back. */
+  id: string;
   toolName: string;
   toolUseId: string;
-  patterns: string[];
+  input?: Record<string, unknown>;
+  /** Pre-rendered prompt sentence from the SDK bridge, e.g.
+   *  "Claude wants to write foo.txt". Prefer this over reconstructing. */
+  title?: string;
+  /** Short noun phrase ("Write file") for compact UI. */
+  displayName?: string;
+  /** Human-readable subtitle. */
+  description?: string;
+  /** File path that triggered the request, if applicable. */
+  blockedPath?: string;
+  /** Why the SDK is asking (decisionReason from the bridge). */
+  decisionReason?: string;
+  /** PermissionUpdates we should send back as `updatedPermissions` when
+   *  the user picks "Always allow". */
+  suggestions?: PermissionUpdate[];
+  /** True when the surrounding session is in plan mode. */
   isPlanMode: boolean;
+};
+
+/* AskUserQuestion (Claude Code built-in tool) — shape mirrors the SDK. */
+export type AskUserQuestionOption = {
+  label: string;
+  description: string;
+  preview?: string;
+};
+
+export type AskUserQuestionItem = {
+  question: string;
+  header: string;
+  options: AskUserQuestionOption[];
+  multiSelect?: boolean;
+};
+
+export type AskUserQuestionRequest = {
+  toolUseId: string;
+  questions: AskUserQuestionItem[];
 };
 
 export type ChatState = {

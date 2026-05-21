@@ -3,6 +3,8 @@
 import { useCallback, useRef } from "react";
 import { chatUrl, abortUrl } from "../constant/api";
 import type {
+  AskUserQuestionItem,
+  AskUserQuestionRequest,
   ChatMessage,
   ChatRequest,
   PermissionMode,
@@ -15,7 +17,9 @@ type StreamingCallbacks = {
   onAppend: (chunk: string) => void;
   onFinalize: () => void;
   onSessionId: (id: string) => void;
-  onPermissionError: (req: PermissionRequest) => void;
+  /** Structured permission ask from SDK canUseTool callback. */
+  onPermissionRequest: (req: PermissionRequest) => void;
+  onAskUserQuestion?: (req: AskUserQuestionRequest) => void;
   onDone: () => void;
   onError: (error: string) => void;
 };
@@ -40,6 +44,25 @@ export function useClaudeStreaming() {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Guarantee exactly one terminal callback (onDone / onError) fires per
+      // request so the chat-panel's isLoading + typing animation always clears,
+      // even if the server closes the stream without emitting a "done" event
+      // or the network drops mid-stream.
+      let settled = false;
+      const wrapped: StreamingCallbacks = {
+        ...callbacks,
+        onDone: () => {
+          if (settled) return;
+          settled = true;
+          callbacks.onDone();
+        },
+        onError: (e: string) => {
+          if (settled) return;
+          settled = true;
+          callbacks.onError(e);
+        },
+      };
+
       try {
         const response = await fetch(chatUrl(), {
           method: "POST",
@@ -49,12 +72,12 @@ export function useClaudeStreaming() {
         });
 
         if (!response.ok) {
-          callbacks.onError(`HTTP ${response.status}: ${response.statusText}`);
+          wrapped.onError(`HTTP ${response.status}: ${response.statusText}`);
           return;
         }
 
         if (!response.body) {
-          callbacks.onError("No response body");
+          wrapped.onError("No response body");
           return;
         }
 
@@ -76,7 +99,7 @@ export function useClaudeStreaming() {
             if (!line.trim()) continue;
             try {
               const parsed: StreamResponse = JSON.parse(line);
-              await processStreamResponse(parsed, request, callbacks, toolRegistry);
+              await processStreamResponse(parsed, request, wrapped, toolRegistry);
             } catch { }
           }
         }
@@ -84,16 +107,36 @@ export function useClaudeStreaming() {
         if (buffer.trim()) {
           try {
             const parsed: StreamResponse = JSON.parse(buffer);
-            await processStreamResponse(parsed, request, callbacks, toolRegistry);
+            await processStreamResponse(parsed, request, wrapped, toolRegistry);
           } catch { }
         }
+
+        // Stream closed cleanly but no "done" event arrived — server hung up
+        // mid-turn (session end, backend crash, proxy timeout). Surface it so
+        // the user sees an error message instead of a frozen typing bubble.
+        if (!settled) {
+          wrapped.onError(
+            "Connection to Claude ended before the response finished. " +
+              "The session may have timed out or the backend disconnected. " +
+              "Please try again."
+          );
+        }
       } catch (err: unknown) {
-        if (err instanceof Error && err.name !== "AbortError") {
-          callbacks.onError(err.message);
+        if (controller.signal.aborted) {
+          // User-initiated stop — handleStop() already cleared loading state.
+          // Mark settled so the finally block doesn't fire a spurious error.
+          settled = true;
+        } else if (err instanceof Error && err.name !== "AbortError") {
+          wrapped.onError(err.message || "Network error while streaming");
         }
       } finally {
         readerRef.current = null;
         abortRef.current = null;
+        // Final safety net — if nothing above settled (e.g. unexpected throw
+        // path), still clear the loading state so the UI doesn't stay stuck.
+        if (!settled) {
+          wrapped.onError("Stream ended unexpectedly.");
+        }
       }
     },
     []
@@ -138,6 +181,35 @@ async function processStreamResponse(
             const toolName = (block.name as string) ?? "unknown";
             // Save mapping so permission errors can look up the real name
             if (toolId) toolRegistry.set(toolId, toolName);
+
+            // AskUserQuestion: open our modal instead of rendering the call
+            // as a regular "tool" message. The SDK will auto-error this call
+            // (no host handler); the suppression branch in tool_result skips
+            // surfacing that error so the user only sees the modal.
+            if (toolName === "AskUserQuestion" && callbacks.onAskUserQuestion) {
+              const input = (block.input as Record<string, unknown>) ?? {};
+              const questions =
+                (input.questions as AskUserQuestionItem[] | undefined) ?? [];
+              // eslint-disable-next-line no-console
+              console.log("[askUserQuestion:intercept]", {
+                toolUseId: toolId,
+                questionCount: questions.length,
+                questions: questions.map((q) => ({
+                  header: q.header,
+                  question: q.question,
+                  multiSelect: !!q.multiSelect,
+                  optionCount: q.options?.length ?? 0,
+                  options: q.options?.map((o) => o.label),
+                })),
+              });
+              callbacks.onFinalize();
+              callbacks.onAskUserQuestion({
+                toolUseId: toolId,
+                questions,
+              });
+              continue;
+            }
+
             callbacks.onFinalize();
             callbacks.onMessage({
               id: `tool_${Date.now()}`,
@@ -193,6 +265,22 @@ async function processStreamResponse(
             }
             const blockToolUseId = (block.tool_use_id as string) ?? "";
             const isErr = (block.is_error as boolean) ?? false;
+
+            // If this is the auto-generated error for our intercepted
+            // AskUserQuestion call, swallow it entirely — the modal handles
+            // the UX. Otherwise the user would see a red error AND the modal.
+            const isAskUserQuestionResult =
+              toolRegistry.get(blockToolUseId) === "AskUserQuestion";
+            if (isAskUserQuestionResult) {
+              // eslint-disable-next-line no-console
+              console.log("[askUserQuestion:suppress-error]", {
+                toolUseId: blockToolUseId,
+                isError: isErr,
+                fullText: resultText.slice(0, 200),
+              });
+              continue;
+            }
+
             callbacks.onMessage({
               id: `result_${Date.now()}`,
               type: "tool_result",
@@ -206,121 +294,31 @@ async function processStreamResponse(
             });
 
             if (isErr) {
-              const toolUseId =
-                blockToolUseId ||
-                (sdkMsg.parent_tool_use_id as string) ||
-                "";
+              // Permission decisions now flow through the SDK's canUseTool
+              // callback (backend) → "permission_request" stream event
+              // (handled below). By the time a tool_result with is_error
+              // reaches us, the tool actually RAN and failed for a real
+              // reason (file not found, command exited non-zero, etc.) —
+              // no permission inference needed.
               const realToolName =
-                toolRegistry.get(toolUseId) ||
-                toolRegistry.get(sdkMsg.parent_tool_use_id as string) ||
-                "Bash";
-
-              const lower = resultText.toLowerCase();
-              // The SDK's per-path permission gate for file-editing tools.
-              // Allow-once / allow-permanently against the allowedTools list
-              // does NOT clear this — the user has to switch permissionMode to
-              // "acceptEdits" (or bypassPermissions). Surface a hint so the
-              // user understands clicking Allow again won't help.
-              const isPerPathFileGate =
-                /claude requested permissions to (write|edit) to/.test(lower) &&
-                /haven'?t granted it yet/.test(lower);
-              // Tools that the SDK auto-denies silently (with empty content)
-              // when they're not in allowedTools. Treat an empty error on any
-              // of these as a permission denial.
-              const PERMISSION_GATED = new Set([
-                "Bash",
-                "Write",
-                "Edit",
-                "Read",
-                "MultiEdit",
-                "NotebookEdit",
-                "WebFetch",
-                "WebSearch",
-              ]);
-              // Tools the backend has explicitly disallowed because we don't
-              // wire a response channel for them. These should NOT trigger a
-              // permission UI (allowing won't help — the host can't fulfill
-              // the call). Just surface a soft note in chat.
-              const UNSUPPORTED_BY_HOST = new Set([
-                "AskUserQuestion",
-              ]);
-              const looksLikePermissionText =
-                /permission|not allowed|denied|requires approval|use.*tool/.test(lower);
-              const looksLikeNonPermission =
-                /enoent|no such file|syntax error|module not found/.test(lower);
-              const emptySilentDenial =
-                resultText.trim().length === 0 && PERMISSION_GATED.has(realToolName);
-              const isUnsupportedHostTool = UNSUPPORTED_BY_HOST.has(realToolName);
-              const isPermission =
-                !isUnsupportedHostTool &&
-                (emptySilentDenial ||
-                  (looksLikePermissionText && !looksLikeNonPermission));
-
+                toolRegistry.get(blockToolUseId) ||
+                (sdkMsg.parent_tool_use_id
+                  ? toolRegistry.get(sdkMsg.parent_tool_use_id as string)
+                  : undefined) ||
+                "tool";
               // eslint-disable-next-line no-console
               console.warn("[tool_error]", {
                 tool: realToolName,
-                toolUseId,
-                isPermission,
-                emptySilentDenial,
-                rawContentShape: Array.isArray(rawContent)
-                  ? "array"
-                  : typeof rawContent,
-                fullText: resultText,
-                rawContent,
+                toolUseId: blockToolUseId,
+                fullText: resultText.slice(0, 500),
               });
-
-              // Host-unsupported tools (e.g. AskUserQuestion): show a soft
-              // system note instead of a red error + permission UI. Granting
-              // permission wouldn't help — we have no channel to answer.
-              if (isUnsupportedHostTool) {
-                callbacks.onMessage({
-                  id: `sys_${Date.now()}`,
-                  type: "system",
-                  content:
-                    `Claude tried to use "${realToolName}" but this app doesn't wire a response ` +
-                    `channel for it yet. Claude will ask you in plain chat instead.`,
-                  timestamp: Date.now(),
-                });
-              } else if (isPerPathFileGate) {
-                // The per-path file gate keeps firing even after Allow. Tell
-                // the user how to break the loop and skip the permission UI
-                // (clicking Allow won't help — the gate is mode-driven).
-                callbacks.onMessage({
-                  id: `err_${Date.now()}`,
-                  type: "error",
-                  content:
-                    `${realToolName} error: ${resultText.slice(0, 600)}\n\n` +
-                    `Hint: this is the SDK's per-path file gate. Adding the tool to the ` +
-                    `allow-list does not clear it. Switch the permission mode chip from ` +
-                    `"default" to "auto" (acceptEdits) — or "bypass" — using the chip in ` +
-                    `the chat composer, then send "continue".`,
-                  timestamp: Date.now(),
-                });
-              } else {
-                // Always surface the tool error as a chat error message — but
-                // synthesize text when the SDK sent an empty body so the user
-                // doesn't just see "Write error: " with nothing after.
-                const displayText = resultText.trim()
-                  ? resultText
-                  : emptySilentDenial
-                    ? `(empty body — SDK auto-denied "${realToolName}" because it is not in the allowed-tools list)`
-                    : "(empty error body)";
-                callbacks.onMessage({
-                  id: `err_${Date.now()}`,
-                  type: "error",
-                  content: `${realToolName} error: ${displayText.slice(0, 2000)}`,
-                  timestamp: Date.now(),
-                });
-
-                if (isPermission) {
-                  callbacks.onPermissionError({
-                    toolName: realToolName,
-                    toolUseId,
-                    patterns: [realToolName],
-                    isPlanMode: request.permissionMode === "plan",
-                  });
-                }
-              }
+              const displayText = resultText.trim() || "(empty error body)";
+              callbacks.onMessage({
+                id: `err_${Date.now()}`,
+                type: "error",
+                content: `${realToolName} error: ${displayText.slice(0, 2000)}`,
+                timestamp: Date.now(),
+              });
             }
           }
         }
@@ -328,9 +326,10 @@ async function processStreamResponse(
         callbacks.onFinalize();
       } else if (messageType === "system") {
         // The SDK emits `{ type: "system", subtype: "permission_denied", ... }`
-        // when a tool call is auto-denied (allowedTools, deny rule, classifier).
-        // This is THE authoritative permission-denial signal — much more
-        // reliable than the empty-body heuristic on tool_result blocks.
+        // for AUTO-denials (deny rules, classifiers). canUseTool handles the
+        // "ask" path now, so this is only informational — log + surface a
+        // soft system note, no permission UI (granting wouldn't help; the
+        // SDK already decided).
         const subtype = sdkMsg.subtype as string | undefined;
         if (subtype === "permission_denied") {
           const toolName = (sdkMsg.tool_name as string) ?? "(unknown)";
@@ -351,22 +350,51 @@ async function processStreamResponse(
             id: `pd_${Date.now()}`,
             type: "system",
             content:
-              `Tool "${toolName}" was auto-denied by the SDK` +
+              `Tool "${toolName}" was auto-denied` +
               (reasonType ? ` (${reasonType})` : "") +
               (reason ? `: ${reason}` : denialMsg ? `: ${denialMsg}` : "") +
-              `. Add it to allowedTools to grant permission.`,
+              `.`,
             timestamp: Date.now(),
-          });
-          callbacks.onPermissionError({
-            toolName,
-            toolUseId,
-            patterns: [toolName],
-            isPlanMode: request.permissionMode === "plan",
           });
         } else {
           callbacks.onFinalize();
         }
       }
+      break;
+    }
+    case "permission_request": {
+      // Structured permission request from the backend's canUseTool
+      // callback — the proper non-regex flow. data shape mirrors
+      // PermissionRequestPayload from backend/handlers/permission.ts.
+      const payload = parsed.data as {
+        id: string;
+        toolUseId: string;
+        toolName: string;
+        input?: Record<string, unknown>;
+        title?: string;
+        displayName?: string;
+        description?: string;
+        blockedPath?: string;
+        decisionReason?: string;
+        suggestions?: Record<string, unknown>[];
+      } | undefined;
+      if (!payload) break;
+      // eslint-disable-next-line no-console
+      console.log("[permission_request]", payload);
+      callbacks.onFinalize();
+      callbacks.onPermissionRequest({
+        id: payload.id,
+        toolName: payload.toolName,
+        toolUseId: payload.toolUseId,
+        input: payload.input,
+        title: payload.title,
+        displayName: payload.displayName,
+        description: payload.description,
+        blockedPath: payload.blockedPath,
+        decisionReason: payload.decisionReason,
+        suggestions: payload.suggestions,
+        isPlanMode: request.permissionMode === "plan",
+      });
       break;
     }
     case "done":
