@@ -12,7 +12,7 @@ export type TabGroup = {
   collapsed: boolean;
 };
 
-export type PermissionMode = "default" | "plan" | "acceptEdits";
+export type PermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermissions";
 
 export type ChatMessage = {
   id: string;

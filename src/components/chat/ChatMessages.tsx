@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { ChatMessage } from "../../types/types";
 import { useWorkspaceTab } from "../../contexts/WorkspaceTabContext";
 import { AnimatedAIBot } from "./AnimatedAIBot";
@@ -27,8 +27,38 @@ function extractLocalhostUrls(text: string): { url: string; port: string }[] {
   return results;
 }
 
-function OpenTabChips({ content }: { content: string }) {
+/** Detect if text contains a "server is now running" signal. */
+function isServerStartSignal(text: string): boolean {
+  const lower = text.toLowerCase();
+  const signals = [
+    "local:   http://localhost",   // Vite
+    "ready on http://localhost",   // Next.js
+    "ready started server on",     // Next.js
+    "server running at http",
+    "listening on http://localhost",
+    "listening on port",
+    "server is running",
+    "app running at",
+    "dev server running",
+    "started server",
+    "> local:",
+  ];
+  return signals.some((s) => lower.includes(s));
+}
+
+function OpenTabChips({ content, autoOpen }: { content: string; autoOpen?: boolean }) {
   const ctx = useWorkspaceTab();
+  const autoOpenedRef = useRef(false);
+
+  useEffect(() => {
+    if (!ctx || !autoOpen || autoOpenedRef.current) return;
+    if (!isServerStartSignal(content)) return;
+    const urls = extractLocalhostUrls(content);
+    if (urls.length === 0) return;
+    autoOpenedRef.current = true;
+    ctx.openTab(urls[0].url, `localhost:${urls[0].port}`);
+  }, [content, autoOpen, ctx]);
+
   if (!ctx) return null;
   const urls = extractLocalhostUrls(content);
   if (urls.length === 0) return null;
@@ -110,7 +140,7 @@ function Message({
             streaming={message.isStreaming}
           />
           {!message.isStreaming && (
-            <OpenTabChips content={message.content} />
+            <OpenTabChips content={message.content} autoOpen />
           )}
         </div>
       );

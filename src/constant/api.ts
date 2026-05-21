@@ -48,4 +48,36 @@ export function conversationUrl(encodedName: string, sessionId: string): string 
   return `${BACKEND_URL}/api/projects/${encodedName}/histories/${sessionId}`;
 }
 
+export function portScanUrl(): string {
+  return `${BACKEND_URL}/api/ports/scan`;
+}
+
+export function logTabUrl(): string {
+  return `${BACKEND_URL}/api/tabs/log`;
+}
+
+export function urlsUrl(): string {
+  return `${BACKEND_URL}/api/urls`;
+}
+
+export function urlByIdUrl(id: number): string {
+  return `${BACKEND_URL}/api/urls/${id}`;
+}
+
+export function openedUrlsUrl(): string {
+  return `${BACKEND_URL}/api/urls/opened`;
+}
+
+export function setOpenedUrl(): string {
+  return `${BACKEND_URL}/api/urls/opened`;
+}
+
+export function eventsUrl(): string {
+  return `${BACKEND_URL}/api/events`;
+}
+
+export function installPackUrl(): string {
+  return `${BACKEND_URL}/api/packs/install`;
+}
+
 export { BACKEND_URL };

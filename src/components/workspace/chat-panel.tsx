@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import type { ChatMessage, PermissionMode, PermissionRequest } from "../../types/types";
 import { useClaudeStreaming } from "../../hooks/useClaudeStreaming";
 import { useChatState, createUserMessage } from "../../hooks/useChatState";
-import { conversationUrl } from "../../constant/api";
+import { conversationUrl, portScanUrl } from "../../constant/api";
 import { convertHistoryMessages } from "../../utils/messageConverter";
 import { ChatMessages } from "../chat/ChatMessages";
 import {
@@ -16,6 +16,7 @@ import {
 import { PermissionInputPanel } from "../chat/PermissionInputPanel";
 import { PlanPermissionInputPanel } from "../chat/PlanPermissionInputPanel";
 import { HistoryView } from "../chat/HistoryView";
+import { EnvironmentPackModal, type InstalledPack } from "../chat/EnvironmentPackModal";
 import { MiniBot } from "../chat/MiniBot";
 import { TypingIndicator } from "../chat/AnimatedAIBot";
 import { ConnectScreen } from "../chat/ConnectScreen";
@@ -24,44 +25,15 @@ import { ProjectSelector } from "../project/ProjectSelector";
 import { useConnectionStatus } from "../../hooks/useConnectionStatus";
 import { useWorkspaceTab } from "../../contexts/WorkspaceTabContext";
 
-/** Returns { url, label } if the message is a "open X at port N" command. */
-function detectTabOpenCommand(msg: string): { url: string; label: string } | null {
-  const lower = msg.toLowerCase();
-  const openWords = ["open", "launch", "start", "show", "kholo", "khol", "chalao", "chala", "tab"];
-  if (!openWords.some((w) => lower.includes(w))) return null;
-
-  // Match: "port 3006", "localhost:3006", ":3006", or bare "3006" when near "open"
-  const portRe = /\bport\s+(\d{2,5})\b|localhost:(\d{2,5})|:(\d{2,5})\b|(?:^|\s)(\d{4,5})(?:\s|$)/i;
-  const m = msg.match(portRe);
-  if (!m) return null;
-  const port = m[1] ?? m[2] ?? m[3] ?? m[4];
-  const num = parseInt(port ?? "0", 10);
-  if (!port || num < 1024 || num > 65535) return null;
-
-  const appMap: [string, string][] = [
-    ["react", "React"],
-    ["next", "Next.js"],
-    ["vue", "Vue"],
-    ["nuxt", "Nuxt"],
-    ["angular", "Angular"],
-    ["svelte", "Svelte"],
-    ["vite", "Vite"],
-    ["node", "Node.js"],
-    ["express", "Express"],
-    ["django", "Django"],
-    ["flask", "Flask"],
-    ["fastapi", "FastAPI"],
-    ["rails", "Rails"],
-    ["laravel", "Laravel"],
-    ["spring", "Spring"],
-  ];
-  let appLabel = "";
-  for (const [key, name] of appMap) {
-    if (lower.includes(key)) { appLabel = name; break; }
-  }
-  const label = appLabel ? `${appLabel} :${port}` : `localhost:${port}`;
-  return { url: `http://localhost:${port}`, label };
-}
+type ScannedPort = {
+  port: number;
+  pid: number | null;
+  processName: string | null;
+  appLabel: string | null;
+  address: string;
+  isWebUI?: boolean;
+  title?: string | null;
+};
 
 type ChatPanelProps = {
   workingDirectory?: string;
@@ -88,6 +60,7 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
   const [planRequest, setPlanRequest] = useState<PermissionRequest | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [showPackModal, setShowPackModal] = useState(false);
   const chatInputRef = useRef<ChatInputHandle>(null);
 
   const connection = useConnectionStatus();
@@ -104,6 +77,79 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
       setCurrentRequestId(null);
     }
   }, [state.currentRequestId, abort, setLoading, setCurrentRequestId]);
+
+  const streamCallbacks = useCallback(
+    () => ({
+      onMessage: (msg: ChatMessage) => addMessage(msg),
+      onAppend: (chunk: string) => appendToLastMessage(chunk),
+      onFinalize: () => finalizeLastMessage(),
+      onSessionId: (id: string) => setSessionId(id),
+      onPermissionError: (req: PermissionRequest) => {
+        if (req.isPlanMode) {
+          setPlanRequest(req);
+        } else {
+          setPermissionRequest(req);
+        }
+      },
+      onDone: () => {
+        setLoading(false);
+        setCurrentRequestId(null);
+      },
+      onError: (error: string) => {
+        addMessage({
+          id: `err_${Date.now()}`,
+          type: "error",
+          content: error,
+          timestamp: Date.now(),
+        });
+        setLoading(false);
+        setCurrentRequestId(null);
+      },
+    }),
+    [addMessage, appendToLastMessage, finalizeLastMessage, setSessionId, setLoading, setCurrentRequestId]
+  );
+
+  const fetchAndShowPorts = useCallback(async () => {
+    const placeholderId = `sys_${Date.now()}`;
+    addMessage({
+      id: placeholderId,
+      type: "system",
+      content: "Scanning running web servers…",
+      timestamp: Date.now(),
+    });
+    try {
+      const res = await fetch(portScanUrl());
+      const data = (await res.json()) as { ports: ScannedPort[] };
+      const ports = data.ports ?? [];
+      if (ports.length === 0) {
+        addMessage({
+          id: `sys_${Date.now()}_r`,
+          type: "system",
+          content: "No running web servers detected.",
+          timestamp: Date.now(),
+        });
+        return;
+      }
+      const lines = ports.map((p) => {
+        const name = p.title || p.appLabel || (p.processName ?? "").replace(/\.exe$/i, "") || "Server";
+        return `- **${name}** → http://localhost:${p.port}`;
+      });
+      addMessage({
+        id: `asst_${Date.now()}`,
+        type: "chat",
+        role: "assistant",
+        content: `Found ${ports.length} running web server${ports.length === 1 ? "" : "s"}:\n\n${lines.join("\n")}`,
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      addMessage({
+        id: `err_${Date.now()}`,
+        type: "error",
+        content: `Failed to scan ports: ${err instanceof Error ? err.message : String(err)}`,
+        timestamp: Date.now(),
+      });
+    }
+  }, [addMessage]);
 
   const handleSend = useCallback(
     (message: string, attachments: Attachment[]) => {
@@ -128,19 +174,10 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
       }
       if (!composed.trim()) return;
 
-      // Direct tab-open command — handle instantly, skip Claude.
-      const tabCmd = detectTabOpenCommand(composed);
-      if (tabCmd && tabCtx) {
-        tabCtx.openTab(tabCmd.url, tabCmd.label);
-        addMessage(createUserMessage(composed));
-        addMessage({
-          id: `sys_${Date.now()}`,
-          type: "system",
-          content: `Opened ${tabCmd.label} → ${tabCmd.url}`,
-          timestamp: Date.now(),
-        });
-        return;
-      }
+      // Note: natural-language tab/save/list intents are handled by Claude
+      // via MCP tools (open_tab, add_bookmark, list_bookmarks, scan_ports).
+      // Only the explicit `/ports` slash command opens the Ports tab instantly
+      // (handled in handleSlashCommand below).
 
       const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -164,33 +201,7 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
           workingDirectory,
           permissionMode,
         },
-        {
-          onMessage: (msg: ChatMessage) => addMessage(msg),
-          onAppend: (chunk: string) => appendToLastMessage(chunk),
-          onFinalize: () => finalizeLastMessage(),
-          onSessionId: (id: string) => setSessionId(id),
-          onPermissionError: (req: PermissionRequest) => {
-            if (req.isPlanMode) {
-              setPlanRequest(req);
-            } else {
-              setPermissionRequest(req);
-            }
-          },
-          onDone: () => {
-            setLoading(false);
-            setCurrentRequestId(null);
-          },
-          onError: (error: string) => {
-            addMessage({
-              id: `err_${Date.now()}`,
-              type: "error",
-              content: error,
-              timestamp: Date.now(),
-            });
-            setLoading(false);
-            setCurrentRequestId(null);
-          },
-        }
+        streamCallbacks()
       );
     },
     [
@@ -201,30 +212,119 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
       permissionMode,
       send,
       addMessage,
-      appendToLastMessage,
-      finalizeLastMessage,
-      setSessionId,
-      setLoading,
-      setCurrentRequestId,
+      streamCallbacks,
+      fetchAndShowPorts,
+      tabCtx,
     ]
+  );
+
+  const handlePackInstalled = useCallback(
+    (pack: InstalledPack) => {
+      addMessage({
+        id: `sys_${Date.now()}`,
+        type: "system",
+        content: `Environment pack "${pack.name}" installed at ${pack.installedAt}.`,
+        timestamp: Date.now(),
+      });
+      const message = pack.hasInstall
+        ? `An environment pack named "${pack.name}" was just installed at ~/.claude/skills/${pack.slug}/.\n\n` +
+          `Please read ~/.claude/skills/${pack.slug}/INSTALL.md and run the install steps it describes ` +
+          `using your shell tools. Confirm with me before each command that modifies the system. ` +
+          `After install completes, run a brief verification and summarize what was installed.`
+        : `An environment pack named "${pack.name}" was just installed at ~/.claude/skills/${pack.slug}/. ` +
+          `It does not include an INSTALL.md, so no install steps are required. ` +
+          `Read ~/.claude/skills/${pack.slug}/SKILL.md so you know what this pack provides.`;
+      handleSend(message, []);
+    },
+    [addMessage, handleSend]
   );
 
   const toggleMode = useCallback(() => {
     setPermissionMode((prev) =>
-      prev === "default" ? "plan" : prev === "plan" ? "acceptEdits" : "default"
+      prev === "default" ? "plan"
+      : prev === "plan" ? "acceptEdits"
+      : prev === "acceptEdits" ? "bypassPermissions"
+      : "default"
     );
   }, []);
 
   const handlePermissionAllow = useCallback(
     (persist: boolean) => {
-      if (permissionRequest) {
-        if (persist) {
-          setAllowedTools((prev) => [...prev, permissionRequest.toolName]);
-        }
-        setPermissionRequest(null);
-      }
+      if (!permissionRequest) return;
+
+      // "Allow once" was a no-op before — it left allowedTools untouched, so
+      // the SDK auto-denied the tool again on the next turn. Add the tool to
+      // updatedTools for this request either way; only commit to React state
+      // when the user picked "Allow permanently".
+      const updatedTools = Array.from(
+        new Set([...allowedTools, permissionRequest.toolName])
+      );
+
+      if (persist) setAllowedTools(updatedTools);
+      setPermissionRequest(null);
+
+      // The SDK's file-editing tools (Write/Edit/MultiEdit/NotebookEdit) have
+      // a per-path permission gate that bare allowedTools does NOT satisfy —
+      // even after granting "Write", subsequent calls return
+      //   "Claude requested permissions to write to X, but you haven't granted it yet"
+      // Bumping permissionMode to "acceptEdits" tells the SDK to auto-approve
+      // edits when the tool is in the allowlist. We only bump when the user
+      // picked Allow Permanently AND the current mode is "default" — that
+      // matches user intent without surprising anyone using stricter modes.
+      const EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+      const shouldBumpMode =
+        persist &&
+        permissionMode === "default" &&
+        EDIT_TOOLS.has(permissionRequest.toolName);
+      const effectiveMode: PermissionMode = shouldBumpMode
+        ? "acceptEdits"
+        : permissionMode;
+      if (shouldBumpMode) setPermissionMode("acceptEdits");
+
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      setCurrentRequestId(requestId);
+      setLoading(true);
+
+      const debugPayload = {
+        action: "permission_allow",
+        tool: permissionRequest.toolName,
+        persist,
+        toolUseId: permissionRequest.toolUseId,
+        updatedTools,
+        sessionId: state.sessionId,
+        permissionMode: effectiveMode,
+        modeBumped: shouldBumpMode,
+        requestId,
+      };
+      // eslint-disable-next-line no-console
+      console.log("[allow]", debugPayload);
+      const modeNote = shouldBumpMode
+        ? `\nSwitched permission mode to "auto" (acceptEdits) — file-editing tools have a per-path gate that bare allowedTools doesn't satisfy.`
+        : "";
+      addMessage({
+        id: `sys_${Date.now()}`,
+        type: "system",
+        content:
+          `Allowing ${permissionRequest.toolName} ${persist ? "permanently" : "for this turn"}` +
+          ` and sending "continue" to resume session ${state.sessionId?.slice(0, 8) ?? "(new)"}.\n` +
+          `Allowed tools after: [${updatedTools.join(", ")}]` +
+          modeNote,
+        timestamp: Date.now(),
+      });
+
+      send(
+        {
+          message: "continue",
+          requestId,
+          sessionId: state.sessionId ?? undefined,
+          allowedTools: updatedTools.length > 0 ? updatedTools : undefined,
+          workingDirectory,
+          permissionMode: effectiveMode,
+        },
+        streamCallbacks()
+      );
     },
-    [permissionRequest]
+    [permissionRequest, allowedTools, state.sessionId, workingDirectory, permissionMode, send, streamCallbacks, setAllowedTools, setPermissionMode, setCurrentRequestId, setLoading, addMessage]
   );
 
   const handlePermissionDeny = useCallback(() => {
@@ -303,12 +403,19 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
         case "project":
           if (onChangeProject) setShowProjectPicker(true);
           break;
+        case "ports":
+          if (tabCtx) {
+            tabCtx.openTab("aiide://ports", "Ports");
+          } else {
+            void fetchAndShowPorts();
+          }
+          break;
         case "help":
           // handled inline in ChatInput (inserts a prompt)
           break;
       }
     },
-    [setMessages, setSessionId, onChangeProject]
+    [setMessages, setSessionId, onChangeProject, fetchAndShowPorts, tabCtx]
   );
 
   return (
@@ -408,6 +515,13 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
         />
       )}
 
+      <EnvironmentPackModal
+        open={showPackModal}
+        onClose={() => setShowPackModal(false)}
+        onInstalled={handlePackInstalled}
+        onCreateRequest={(message) => handleSend(message, [])}
+      />
+
       {showProjectPicker && onChangeProject && (
         <div className="project-overlay" onClick={() => setShowProjectPicker(false)}>
           <div onClick={(e) => e.stopPropagation()}>
@@ -452,6 +566,7 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
         onSend={handleSend}
         onStop={handleStop}
         onSlashCommand={handleSlashCommand}
+        onAddEnvironmentPack={() => setShowPackModal(true)}
         isLoading={state.isLoading}
         permissionMode={permissionMode}
         onToggleMode={toggleMode}

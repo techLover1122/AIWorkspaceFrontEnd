@@ -37,12 +37,13 @@ export type Attachment = {
   kind: "image" | "file";
 };
 
-export type SlashCommand = "clear" | "history" | "project" | "help";
+export type SlashCommand = "clear" | "history" | "project" | "help" | "ports";
 
 type ChatInputProps = {
   onSend: (message: string, attachments: Attachment[]) => void;
   onStop?: () => void;
   onSlashCommand?: (cmd: SlashCommand) => void;
+  onAddEnvironmentPack?: () => void;
   isLoading: boolean;
   permissionMode: PermissionMode;
   onToggleMode: () => void;
@@ -56,6 +57,7 @@ const SLASH_COMMANDS: { cmd: SlashCommand; label: string; hint: string }[] = [
   { cmd: "clear", label: "/clear", hint: "Clear chat history" },
   { cmd: "history", label: "/history", hint: "Open session history" },
   { cmd: "project", label: "/project", hint: "Switch working directory" },
+  { cmd: "ports", label: "/ports", hint: "List all running web servers" },
   { cmd: "help", label: "/help", hint: "Insert a help prompt" },
 ];
 
@@ -63,6 +65,7 @@ const MODE_LABEL: Record<PermissionMode, string> = {
   default: "default",
   plan: "plan",
   acceptEdits: "auto",
+  bypassPermissions: "bypass",
 };
 
 /* ============================================================
@@ -119,6 +122,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     onSend,
     onStop,
     onSlashCommand,
+    onAddEnvironmentPack,
     isLoading,
     permissionMode,
     onToggleMode,
@@ -363,6 +367,17 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             >
               <IconPlus />
             </button>
+            {onAddEnvironmentPack && (
+              <button
+                type="button"
+                className="tool-icon-btn"
+                onClick={onAddEnvironmentPack}
+                title="Add environment pack"
+                aria-label="Add environment pack"
+              >
+                <IconPackage />
+              </button>
+            )}
             <button
               type="button"
               className="tool-icon-btn"
@@ -482,6 +497,20 @@ function IconSlash() {
         d="M11 3L5 13"
         stroke="currentColor"
         strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconPackage() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M8 1.5L13.5 4v8L8 14.5 2.5 12V4L8 1.5z M2.5 4L8 6.5 13.5 4 M8 6.5v8"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
         strokeLinecap="round"
       />
     </svg>

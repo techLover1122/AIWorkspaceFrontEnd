@@ -2,6 +2,7 @@
 
 import { DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { createInitialTabs } from "../../constant/constants";
+import { logTabUrl, openedUrlsUrl, setOpenedUrl, urlsUrl, eventsUrl } from "../../constant/api";
 import { WorkspaceTabContext } from "../../contexts/WorkspaceTabContext";
 import { ChatPanel } from "./chat-panel";
 import { EditorTabs } from "./editor-tabs";
@@ -19,13 +20,39 @@ const DEFAULT_CHAT_WIDTH = 380;
 const MIN_CHAT_WIDTH = 280;
 const MAX_CHAT_WIDTH_RATIO = 0.7;
 
+/** Convert a Windows path like D:\foo\bar → /mnt/d/foo/bar for WSL code-server. */
+function toCodeServerPath(p: string): string {
+  if (!p) return p;
+  if (p.startsWith("/")) return p; // already a Linux/WSL path
+  const m = p.match(/^([A-Za-z]):[/\\](.*)/);
+  if (m) return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, "/")}`;
+  return p;
+}
+
+function buildCodeServerUrl(base: string, workingDirectory?: string): string {
+  if (!workingDirectory) return base;
+  const folder = toCodeServerPath(workingDirectory);
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}folder=${encodeURIComponent(folder)}`;
+}
+
 export function WorkspaceShell({
   codeServerUrl,
   workingDirectory,
   onChangeProject,
 }: WorkspaceShellProps) {
-  const [tabs, setTabs] = useState(() => createInitialTabs(codeServerUrl));
+  const [tabs, setTabs] = useState(() =>
+    createInitialTabs(buildCodeServerUrl(codeServerUrl, workingDirectory))
+  );
   const [activeTabId, setActiveTabId] = useState("vscode-1");
+
+  // Keep the VS Code tab in sync when the working directory changes.
+  useEffect(() => {
+    const url = buildCodeServerUrl(codeServerUrl, workingDirectory);
+    setTabs((prev) =>
+      prev.map((t) => (t.id === "vscode-1" ? { ...t, url } : t))
+    );
+  }, [workingDirectory, codeServerUrl]);
   const [groups, setGroups] = useState<Record<string, TabGroup>>({});
   const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
@@ -75,16 +102,59 @@ export function WorkspaceShell({
     });
   };
 
-  // Called when user picks a URL from inside the new tab page
-  const handleTabNavigate = useCallback((tabId: string, url: string, label: string) => {
-    setTabs((prev) =>
-      prev.map((t) => (t.id === tabId ? { ...t, url, label } : t))
-    );
+  // Ensure a URL exists in the SQLite `urls` bookmarks table (idempotent, fire-and-forget).
+  const ensureBookmark = useCallback((url: string, name?: string) => {
+    if (!url || url.startsWith("aiide://")) return;
+    fetch(urlsUrl(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, name }),
+    }).catch(() => { /* ignore */ });
   }, []);
 
-  // Called from chat (via WorkspaceTabContext) — opens a URL in a new tab,
-  // or switches to it if already open.
+  // Mark a URL opened/closed in the SQLite urls table (fire-and-forget).
+  const markUrlOpened = useCallback((url: string, opened: boolean) => {
+    if (!url || url.startsWith("aiide://")) return;
+    fetch(setOpenedUrl(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, opened }),
+    }).catch(() => { /* ignore */ });
+  }, []);
+
+  // Called when user picks a URL from inside the new tab page (replaces the blank tab's URL).
+  const handleTabNavigate = useCallback(
+    (tabId: string, url: string, label: string) => {
+      let prevUrl: string | undefined;
+      setTabs((prev) => {
+        const found = prev.find((t) => t.id === tabId);
+        prevUrl = found?.url;
+        return prev.map((t) => (t.id === tabId ? { ...t, url, label } : t));
+      });
+      if (prevUrl && prevUrl !== url) markUrlOpened(prevUrl, false);
+      ensureBookmark(url, label);
+      markUrlOpened(url, true);
+      // Also log to opened_tabs history
+      fetch(logTabUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, label, projectPath: workingDirectory }),
+      }).catch(() => { /* ignore */ });
+    },
+    [markUrlOpened, ensureBookmark, workingDirectory]
+  );
+
+  // Called from chat / context — opens a URL in a new tab (or switches if already open).
   const handleOpenTab = useCallback((url: string, label: string) => {
+    // Side effects fire upfront (outside the state updater)
+    fetch(logTabUrl(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, label, projectPath: workingDirectory }),
+    }).catch(() => { /* ignore */ });
+    ensureBookmark(url, label);
+    markUrlOpened(url, true);
+
     setTabs((currentTabs) => {
       const existing = currentTabs.find((t) => t.url === url);
       if (existing) {
@@ -95,6 +165,51 @@ export function WorkspaceShell({
       setActiveTabId(nextTab.id);
       return [...currentTabs, nextTab];
     });
+  }, [workingDirectory, markUrlOpened, ensureBookmark]);
+
+  // Restore previously open tabs on app load.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch(openedUrlsUrl());
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          urls: { id: number; name: string | null; url: string }[];
+        };
+        for (const u of data.urls) {
+          handleOpenTab(u.url, u.name || u.url);
+        }
+      } catch { /* ignore */ }
+    })();
+    // run once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Subscribe to backend SSE events — MCP tools push commands here
+  // (e.g. when Claude calls `open_tab`, we receive it and act on it).
+  useEffect(() => {
+    const es = new EventSource(eventsUrl());
+    es.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data) as
+          | { type: "hello" }
+          | { type: "open_tab"; url: string; label: string }
+          | { type: "bookmark_added"; url: string; name: string | null }
+          | { type: "bookmark_deleted"; id: number };
+        if (event.type === "open_tab") {
+          handleOpenTab(event.url, event.label);
+        }
+        // bookmark events: new tab page re-fetches on focus, so no action needed here.
+      } catch { /* ignore malformed */ }
+    };
+    es.onerror = () => {
+      // EventSource auto-reconnects; nothing to do here.
+    };
+    return () => es.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCloseTab = (tabId: string) => {
@@ -102,6 +217,7 @@ export function WorkspaceShell({
       if (currentTabs.length === 1) return currentTabs;
 
       const closingTab = currentTabs.find((t) => t.id === tabId);
+      if (closingTab?.url) markUrlOpened(closingTab.url, false);
       const closingGroupId = closingTab?.groupId;
       const closingIndex = currentTabs.findIndex((t) => t.id === tabId);
       if (closingIndex === -1) return currentTabs;
@@ -237,7 +353,7 @@ export function WorkspaceShell({
               onGroupRemove={handleGroupRemove}
               onGroupToggle={handleGroupToggle}
               onGroupRename={handleGroupRename}
-            />
+              />
             <div className="editor-body">
               <PreviewPane
                 tabId={activeTab.id}

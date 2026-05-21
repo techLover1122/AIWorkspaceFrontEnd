@@ -1,122 +1,110 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { urlsUrl, urlByIdUrl } from "../../constant/api";
 
 type NewTabPageProps = {
   codeServerUrl: string;
   onNavigate: (url: string, label: string) => void;
 };
 
-const PRESET_CARDS = [
-  {
-    id: "vite",
-    label: "Vite",
-    desc: "React / Vue dev server",
-    port: 5173,
-    bg: "#1a1a2e",
-    accent: "#646cff",
-    icon: (
-      <svg viewBox="0 0 32 32" width="28" height="28" fill="none">
-        <polygon points="16,2 30,28 2,28" fill="#646cff" opacity="0.9" />
-        <polygon points="16,8 26,26 6,26" fill="#ffbd2e" opacity="0.85" />
-      </svg>
-    ),
-  },
-  {
-    id: "angular",
-    label: "Angular",
-    desc: "Angular CLI server",
-    port: 4200,
-    bg: "#1a0a0a",
-    accent: "#dd0031",
-    icon: (
-      <svg viewBox="0 0 32 32" width="28" height="28" fill="none">
-        <rect width="32" height="32" rx="6" fill="#1a0a0a" />
-        <polygon points="16,4 28,9 26,23 16,28 6,23 4,9" fill="#dd0031" opacity="0.9" />
-        <text x="10" y="22" fontSize="11" fontWeight="900" fill="#fff" fontFamily="monospace">A</text>
-      </svg>
-    ),
-  },
-  {
-    id: "django",
-    label: "Django",
-    desc: "Python backend",
-    port: 8000,
-    bg: "#0c4b33",
-    accent: "#44b78b",
-    icon: (
-      <svg viewBox="0 0 32 32" width="28" height="28" fill="none">
-        <rect width="32" height="32" rx="6" fill="#0c4b33" />
-        <text x="5" y="22" fontSize="13" fontWeight="700" fill="#44b78b" fontFamily="monospace">Dj</text>
-      </svg>
-    ),
-  },
-  {
-    id: "express",
-    label: "Express",
-    desc: "Node.js backend",
-    port: 3001,
-    bg: "#1a1a1a",
-    accent: "#68a063",
-    icon: (
-      <svg viewBox="0 0 32 32" width="28" height="28" fill="none">
-        <rect width="32" height="32" rx="6" fill="#1a1a1a" />
-        <text x="4" y="22" fontSize="13" fontWeight="700" fill="#68a063" fontFamily="monospace">Ex</text>
-      </svg>
-    ),
-  },
-  {
-    id: "flask",
-    label: "Flask",
-    desc: "Python micro-framework",
-    port: 5001,
-    bg: "#0a2e2e",
-    accent: "#05c4a0",
-    icon: (
-      <svg viewBox="0 0 32 32" width="28" height="28" fill="none">
-        <rect width="32" height="32" rx="6" fill="#0a2e2e" />
-        <text x="5" y="22" fontSize="13" fontWeight="700" fill="#05c4a0" fontFamily="monospace">Fl</text>
-      </svg>
-    ),
-  },
-];
+type SavedUrl = {
+  id: number;
+  name: string | null;
+  icon: string | null;
+  url: string;
+  created_at: number;
+};
 
 function urlFromInput(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "";
-  // pure port number like "5173"
   if (/^\d+$/.test(trimmed)) return `http://localhost:${trimmed}`;
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
   return `http://${trimmed}`;
 }
 
-function labelFromUrl(url: string): string {
+function hostFromUrl(url: string): string {
   try {
-    const p = new URL(url);
-    return p.hostname + (p.port ? `:${p.port}` : "");
+    const u = new URL(url);
+    return u.host;
   } catch {
     return url.replace(/^https?:\/\//, "").split("/")[0] ?? url;
   }
 }
 
+function fallbackLetter(s: string): string {
+  const c = s.replace(/^https?:\/\//, "").trim().charAt(0).toUpperCase();
+  return c || "?";
+}
+
 export function NewTabPage({ codeServerUrl, onNavigate }: NewTabPageProps) {
   const [input, setInput] = useState("");
+  const [saved, setSaved] = useState<SavedUrl[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [iconErrors, setIconErrors] = useState<Set<number>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const loadUrls = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(urlsUrl());
+      if (!res.ok) return;
+      const data = (await res.json()) as { urls: SavedUrl[] };
+      setSaved(data.urls ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadUrls();
+  }, [loadUrls]);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  const handleGo = () => {
+  const handleAdd = useCallback(async () => {
     const url = urlFromInput(input);
     if (!url) return;
-    onNavigate(url, labelFromUrl(url));
-  };
+    setAdding(true);
+    try {
+      const res = await fetch(urlsUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (!res.ok) return;
+      setInput("");
+      await loadUrls();
+    } finally {
+      setAdding(false);
+    }
+  }, [input, loadUrls]);
+
+  const handleDelete = useCallback(
+    async (id: number, e: React.MouseEvent) => {
+      e.stopPropagation();
+      await fetch(urlByIdUrl(id), { method: "DELETE" });
+      setSaved((prev) => prev.filter((u) => u.id !== id));
+    },
+    []
+  );
+
+  const onIconError = useCallback((id: number) => {
+    setIconErrors((s) => {
+      if (s.has(id)) return s;
+      const next = new Set(s);
+      next.add(id);
+      return next;
+    });
+  }, []);
 
   return (
     <div className="ntp-root">
       <div className="ntp-inner">
-
         {/* VS Code — primary large card */}
         <button
           type="button"
@@ -126,7 +114,13 @@ export function NewTabPage({ codeServerUrl, onNavigate }: NewTabPageProps) {
           <span className="ntp-vscode-icon">
             <svg viewBox="0 0 24 24" width="36" height="36" fill="none">
               <rect x="1" y="1" width="22" height="22" rx="5" fill="#007acc" />
-              <path d="M6 7.5l6 4.5-6 4.5M13 16h5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path
+                d="M6 7.5l6 4.5-6 4.5M13 16h5"
+                stroke="#fff"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
           </span>
           <div className="ntp-vscode-info">
@@ -136,7 +130,7 @@ export function NewTabPage({ codeServerUrl, onNavigate }: NewTabPageProps) {
           <span className="ntp-vscode-arrow">→</span>
         </button>
 
-        {/* URL bar */}
+        {/* URL add bar */}
         <div className="ntp-urlbar-wrap">
           <svg className="ntp-urlbar-icon" viewBox="0 0 16 16" fill="none">
             <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.4" />
@@ -146,47 +140,115 @@ export function NewTabPage({ codeServerUrl, onNavigate }: NewTabPageProps) {
             ref={inputRef}
             type="text"
             className="ntp-urlbar-input"
-            placeholder="Enter URL or port  —  e.g.  5173  or  http://localhost:8000"
+            placeholder="Add a URL or port — e.g. 5173, localhost:3000, https://github.com"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleGo(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleAdd();
+            }}
             spellCheck={false}
             autoComplete="off"
+            disabled={adding}
           />
           <button
             type="button"
             className="ntp-urlbar-go"
-            onClick={handleGo}
-            disabled={!input.trim()}
+            onClick={handleAdd}
+            disabled={!input.trim() || adding}
           >
-            Open
+            {adding ? "Adding…" : "Add"}
           </button>
         </div>
 
-        {/* Preset cards */}
-        <div className="ntp-section-label">Common dev servers</div>
-        <div className="ntp-grid">
-          {PRESET_CARDS.map((card) => (
-            <button
-              key={card.id}
-              type="button"
-              className="ntp-card"
-              style={{ "--ntp-card-accent": card.accent } as React.CSSProperties}
-              onClick={() =>
-                onNavigate(
-                  `http://localhost:${card.port}`,
-                  `${card.label} :${card.port}`
-                )
-              }
-            >
-              <span className="ntp-card-icon">{card.icon}</span>
-              <span className="ntp-card-label">{card.label}</span>
-              <span className="ntp-card-port">:{card.port}</span>
-              <span className="ntp-card-desc">{card.desc}</span>
-            </button>
-          ))}
+        {/* Saved URLs */}
+        <div className="ntp-section-row">
+          <span className="ntp-section-label">
+            Saved URLs
+            {loading && <span className="ntp-scanning-dot" aria-hidden />}
+          </span>
+          <button
+            type="button"
+            className="ntp-refresh-btn"
+            onClick={loadUrls}
+            title="Reload"
+          >
+            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" aria-hidden>
+              <path
+                d="M3 8a5 5 0 0 1 9-3M13 3v3h-3M13 8a5 5 0 0 1-9 3M3 13v-3h3"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
         </div>
 
+        {saved.length === 0 ? (
+          <div className="ntp-detected-empty">
+            {loading
+              ? "Loading…"
+              : "No saved URLs yet. Type a URL above and press Add."}
+          </div>
+        ) : (
+          <div className="ntp-grid">
+            {saved.map((u) => {
+              const displayName = u.name || hostFromUrl(u.url);
+              const showImg = u.icon && !iconErrors.has(u.id);
+              return (
+                <div
+                  key={u.id}
+                  className="ntp-card ntp-bookmark-card"
+                  onClick={() => onNavigate(u.url, displayName)}
+                  title={`${displayName}\n${u.url}`}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onNavigate(u.url, displayName);
+                    }
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="ntp-bookmark-delete"
+                    onClick={(e) => handleDelete(u.id, e)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title="Remove"
+                    aria-label="Delete bookmark"
+                  >
+                    <svg viewBox="0 0 16 16" width="11" height="11" fill="none" aria-hidden>
+                      <path
+                        d="M4 4l8 8M12 4l-8 8"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                  <span className="ntp-bookmark-icon">
+                    {showImg ? (
+                      <img
+                        src={u.icon!}
+                        alt=""
+                        width={32}
+                        height={32}
+                        loading="lazy"
+                        onError={() => onIconError(u.id)}
+                      />
+                    ) : (
+                      <span className="ntp-bookmark-letter" aria-hidden>
+                        {fallbackLetter(displayName)}
+                      </span>
+                    )}
+                  </span>
+                  <span className="ntp-bookmark-name">{displayName}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
