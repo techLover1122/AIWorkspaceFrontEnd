@@ -37,6 +37,16 @@ export type StreamResponse = {
   error?: string;
 };
 
+export type ChatAttachmentPayload = {
+  /** "image/png", "image/jpeg", … — used for the Anthropic SDK image
+   *  source's `media_type`. */
+  mediaType: string;
+  /** Base64-encoded bytes (no `data:...;base64,` prefix). */
+  base64: string;
+  /** Original filename, surfaced in the chat UI and SDK metadata. */
+  name: string;
+};
+
 export type ChatRequest = {
   message: string;
   sessionId?: string;
@@ -44,6 +54,9 @@ export type ChatRequest = {
   allowedTools?: string[];
   workingDirectory?: string;
   permissionMode?: PermissionMode;
+  /** Image attachments sent alongside the message — passed to Claude as
+   *  multimodal content blocks instead of file-path mentions. */
+  attachments?: ChatAttachmentPayload[];
 };
 
 export type ProjectInfo = {

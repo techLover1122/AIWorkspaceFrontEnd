@@ -22,6 +22,9 @@ import type { PermissionMode } from "../../types/types";
 export type ChatInputHandle = {
   /** Replace the textarea content and focus it. */
   setDraft: (text: string) => void;
+  /** Add an image attachment to the composer (used by the annotation
+   *  snapshot flow to drop a screenshot into the next message). */
+  addImageAttachment: (file: File) => void;
 };
 
 /* ============================================================
@@ -160,6 +163,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           el.style.height = "auto";
           el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
         });
+      },
+      addImageAttachment: (file: File) => {
+        void (async () => {
+          const att = await fileToAttachment(file);
+          setAttachments((prev) => [...prev, att]);
+          requestAnimationFrame(() => textareaRef.current?.focus());
+        })();
       },
     }),
     []

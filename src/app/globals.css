@@ -159,12 +159,125 @@ button {
   flex-direction: column;
   background: var(--vsc-bg);
   min-width: 0;
+  /* Anchor for the absolutely-positioned overlay toolbar that floats over
+     the preview area on port-bearing tabs. */
+  position: relative;
 }
 
 .editor-body {
   flex: 1;
   overflow: hidden;
   background: var(--vsc-bg);
+}
+
+/* ===== Editor overlay toolbar (port preview tools) ===== */
+
+.editor-overlay-toolbar {
+  /* Slide out from the chat-panel edge — flush against the right side so
+     the toolbar reads as a drawer attached to the chat panel, both when
+     expanded and (especially) when collapsed into a handle. */
+  position: absolute;
+  top: 44px; /* 35px tab strip + 9px gap */
+  right: 0;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  background: var(--vsc-panel, #1f1f1f);
+  border: 1px solid var(--vsc-border-strong);
+  border-right: 0; /* flush against the chat-panel — no doubled edge */
+  border-radius: 10px 0 0 10px;
+  box-shadow: -2px 2px 10px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  max-width: 360px;
+  transition:
+    max-width 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    padding 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-radius 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.editor-overlay-toolbar.collapsed {
+  max-width: 36px;
+  padding: 3px;
+  border-radius: 999px 0 0 999px;
+}
+
+.overlay-toolbar-btn,
+.overlay-toolbar-collapse,
+.overlay-toolbar-handle {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: var(--vsc-text-muted);
+  padding: 0;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.overlay-toolbar-btn svg,
+.overlay-toolbar-collapse svg,
+.overlay-toolbar-handle svg {
+  width: 18px;
+  height: 18px;
+}
+
+.overlay-toolbar-btn:hover,
+.overlay-toolbar-collapse:hover,
+.overlay-toolbar-handle:hover {
+  background: var(--vsc-hover);
+  color: var(--vsc-text-emphasis);
+}
+
+.overlay-toolbar-btn.active {
+  background: rgba(167, 139, 250, 0.18);
+  color: var(--bot-accent, #a78bfa);
+}
+
+.overlay-toolbar-btn.active:hover {
+  background: rgba(167, 139, 250, 0.28);
+}
+
+.overlay-toolbar-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 12px 0 10px;
+  background: var(--bot-accent, #a78bfa);
+  border: 0;
+  border-radius: 7px;
+  color: #1f1f1f;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+
+.overlay-toolbar-send:hover {
+  filter: brightness(1.1);
+}
+
+.overlay-toolbar-send svg {
+  width: 14px;
+  height: 14px;
+}
+
+.overlay-toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--vsc-border-strong);
+  margin: 0 2px;
+}
+
+.editor-overlay-toolbar.collapsed .overlay-toolbar-handle {
+  border-radius: 999px;
 }
 
 /* ===== Editor tabs (VS Code style) ===== */
@@ -462,12 +575,72 @@ button {
 .preview-content {
   height: 100%;
   display: flex;
+  /* Anchor for the cursor overlay that sits above the iframe when an
+     overlay-toolbar tool is active. */
+  position: relative;
 }
 
 .preview-iframe {
   flex: 1;
   border: 0;
   background: #ffffff;
+}
+
+.preview-cursor-overlay {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  /* Tool cursor is applied inline via the `cursor` style. */
+  z-index: 5;
+}
+
+/* Captured snapshot displayed in place of the live iframe during the
+   annotation flow. Pinned to the same box as the iframe and rendered as
+   a flat image so it stays static while the user draws on top. */
+.preview-snapshot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  z-index: 3;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+/* Finalized marker strokes — sit above the iframe inside the canvas
+   stack. In annotation mode this is full-stack-size; in non-annotation
+   mode it would be full-viewport (but we don't actually render it
+   outside annotation mode anymore). */
+.preview-drawings {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 4;
+}
+
+/* Live drawing capture surface — only mounted while the marker tool is
+   active inside annotation mode. Catches pointer events so the user can
+   draw freely. Fills the canvas stack. */
+.preview-drawing-surface {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  z-index: 6;
+  /* `pan-x pan-y` lets the user scroll the wrapper with touchpad / touch
+     while the surface still captures pointer-down for drawing. */
+  touch-action: pan-x pan-y;
+}
+
+/* In-progress polyline rendered inside the drawing surface. */
+.preview-drawing-live {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 /* ===== Chat panel (right sidebar — Claude Code VS Code style) ===== */

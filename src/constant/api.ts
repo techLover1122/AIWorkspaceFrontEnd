@@ -84,4 +84,5 @@ export function permissionDecisionUrl(id: string): string {
   return `${BACKEND_URL}/api/permission/${id}`;
 }
 
+
 export { BACKEND_URL };

@@ -41,12 +41,39 @@ type ScannedPort = {
   title?: string | null;
 };
 
+/** Read a File into its base64 payload + detected media type. Strips the
+ *  `data:<type>;base64,` prefix so the result is ready to drop straight
+ *  into an Anthropic SDK image source. */
+function readFileAsBase64(
+  file: File
+): Promise<{ base64: string; mediaType: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const comma = result.indexOf(",");
+      const header = comma >= 0 ? result.slice(0, comma) : "";
+      const base64 = comma >= 0 ? result.slice(comma + 1) : result;
+      const m = header.match(/^data:([^;]+);base64$/);
+      const mediaType = m ? m[1] : file.type || "application/octet-stream";
+      resolve({ base64, mediaType });
+    };
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("FileReader failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
 type ChatPanelProps = {
   workingDirectory?: string;
   onChangeProject?: (path: string) => void;
+  /** Optional ref the parent (WorkspaceShell) uses to push attachments
+   *  into the composer — e.g. the annotation-snapshot Send button drops a
+   *  composited PNG here. */
+  chatInputRef?: React.Ref<ChatInputHandle>;
 };
 
-export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps) {
+export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: externalChatInputRef }: ChatPanelProps) {
   const tabCtx = useWorkspaceTab();
   const {
     state,
@@ -72,6 +99,23 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
   // via the eye icon in the composer when they want to debug a turn.
   const [showToolDetails, setShowToolDetails] = useState(false);
   const chatInputRef = useRef<ChatInputHandle>(null);
+
+  // Fan the ChatInput's imperative handle out to both our internal ref
+  // (used for setDraft / handleReuseMessage) and an optional external
+  // ref from the parent (WorkspaceShell uses it for the snapshot Send
+  // flow to attach a composited image).
+  const setChatInputRef = useCallback(
+    (node: ChatInputHandle | null) => {
+      chatInputRef.current = node;
+      if (typeof externalChatInputRef === "function") {
+        externalChatInputRef(node);
+      } else if (externalChatInputRef) {
+        (externalChatInputRef as { current: ChatInputHandle | null }).current =
+          node;
+      }
+    },
+    [externalChatInputRef]
+  );
 
   const connection = useConnectionStatus();
   const isConnected = connection.status === "connected";
@@ -192,53 +236,69 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
     (message: string, attachments: Attachment[]) => {
       if (state.isLoading) return;
 
-      // Compose the prompt — append a note describing any attachments. (Image
-      // bytes aren't yet forwarded to the SDK; the model will only see the
-      // filenames.)
+      const imageAttachments = attachments.filter((a) => a.kind === "image");
+      const otherAttachments = attachments.filter((a) => a.kind !== "image");
+
+      // Images travel as proper multimodal content blocks (base64) to the
+      // SDK so Claude actually SEES them — not as file-path mentions, which
+      // it would then try to Read off disk and fail. Non-image attachments
+      // still get a text mention since we don't have a binary path for
+      // them.
       let composed = message;
-      if (attachments.length > 0) {
-        const lines = attachments.map((a) =>
-          `- ${a.kind === "image" ? "image" : "file"}: ${a.name}${a.meta ? ` (${a.meta})` : ""}`
+      if (otherAttachments.length > 0) {
+        const lines = otherAttachments.map((a) =>
+          `- file: ${a.name}${a.meta ? ` (${a.meta})` : ""}`
         );
-        composed = [
-          message,
-          message ? "" : null,
-          "[attached]",
-          ...lines,
-        ]
+        composed = [message, message ? "" : null, "[attached]", ...lines]
           .filter((s) => s !== null)
           .join("\n");
       }
-      if (!composed.trim()) return;
-
-      // Note: natural-language tab/save/list intents are handled by Claude
-      // via MCP tools (open_tab, add_bookmark, list_bookmarks, scan_ports).
-      // Only the explicit `/ports` slash command opens the Ports tab instantly
-      // (handled in handleSlashCommand below).
+      if (!composed.trim() && imageAttachments.length === 0) return;
 
       const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-      // Only the user message is added eagerly. The assistant message is
-      // created lazily by the streaming hook as soon as the first text
-      // chunk arrives — that way system "init"/"result" metadata messages
-      // get rendered in the natural order (init first, then assistant).
-      addMessage(createUserMessage(composed));
+      // User-visible message in the chat history. We include a brief note
+      // about any attached images so the transcript reads sensibly without
+      // dumping their bytes.
+      const displayMessage = imageAttachments.length > 0
+        ? [
+            composed,
+            composed ? "" : null,
+            `[${imageAttachments.length} image${imageAttachments.length === 1 ? "" : "s"} attached]`,
+            ...imageAttachments.map((a) => `- ${a.name}${a.meta ? ` (${a.meta})` : ""}`),
+          ]
+            .filter((s) => s !== null)
+            .join("\n")
+        : composed;
+      addMessage(createUserMessage(displayMessage));
 
       setCurrentRequestId(requestId);
       setLoading(true);
       setPermissionRequest(null);
       setPlanRequest(null);
 
-      send(
-        {
-          message: composed,
-          requestId,
-          sessionId: state.sessionId ?? undefined,
-          workingDirectory,
-          permissionMode,
-        },
-        streamCallbacks()
-      );
+      // Encode images as base64 before sending to the backend. Sequential
+      // is fine — the files are typically one screenshot, and parallel
+      // FileReader work doesn't usually beat sequential by much.
+      void (async () => {
+        const encoded = await Promise.all(
+          imageAttachments.map(async (a) => {
+            const { base64, mediaType } = await readFileAsBase64(a.file);
+            return { name: a.name, base64, mediaType };
+          })
+        );
+        send(
+          {
+            message: composed,
+            requestId,
+            sessionId: state.sessionId ?? undefined,
+            workingDirectory,
+            permissionMode,
+            attachments: encoded.length > 0 ? encoded : undefined,
+          },
+          streamCallbacks()
+        );
+      })();
     },
     [
       state.isLoading,
@@ -651,7 +711,7 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
       )}
 
       <ChatInput
-        ref={chatInputRef}
+        ref={setChatInputRef}
         onSend={handleSend}
         onStop={handleStop}
         onSlashCommand={handleSlashCommand}
