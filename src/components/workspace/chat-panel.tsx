@@ -67,6 +67,10 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
   const [askQuestion, setAskQuestion] = useState<AskUserQuestionRequest | null>(null);
+  // Tool-call internals (TodoWrite payloads, tool_result blobs, thinking
+  // blocks) stay hidden by default — the user explicitly toggles them on
+  // via the eye icon in the composer when they want to debug a turn.
+  const [showToolDetails, setShowToolDetails] = useState(false);
   const chatInputRef = useRef<ChatInputHandle>(null);
 
   const connection = useConnectionStatus();
@@ -584,6 +588,7 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
         <>
       {showHistory && (
         <HistoryView
+          workingDirectory={workingDirectory}
           onSelect={handleHistorySelect}
           onClose={() => setShowHistory(false)}
         />
@@ -617,7 +622,11 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
         </div>
       )}
 
-      <ChatMessages messages={state.messages} onReuse={handleReuseMessage} />
+      <ChatMessages
+        messages={state.messages}
+        onReuse={handleReuseMessage}
+        showToolDetails={showToolDetails}
+      />
 
       {permissionRequest && (
         <PermissionInputPanel
@@ -650,6 +659,8 @@ export function ChatPanel({ workingDirectory, onChangeProject }: ChatPanelProps)
         isLoading={state.isLoading}
         permissionMode={permissionMode}
         onToggleMode={toggleMode}
+        showToolDetails={showToolDetails}
+        onToggleToolDetails={() => setShowToolDetails((v) => !v)}
       />
         </>
       )}

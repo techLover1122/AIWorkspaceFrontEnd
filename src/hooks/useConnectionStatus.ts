@@ -126,14 +126,15 @@ type ServerResponse = {
  */
 export function useConnectionStatus(): ConnectionStatus {
   const [state, setState] = useState<ConnectionState>({ status: "idle" });
-  const [isInitialCheck, setIsInitialCheck] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return window.localStorage.getItem(STORAGE_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  // Always start with the loader on. We can't read localStorage during the
+  // initial render without causing a hydration mismatch — `window` is
+  // undefined on the server / pre-hydration, so a localStorage-based
+  // initializer flips from `false` to `true` between the first paint and
+  // the hydrated render, briefly flashing the ConnectScreen before the
+  // loader takes over. Defaulting to `true` and clearing it in the mount
+  // effect (when we know whether to actually probe the backend) keeps the
+  // first frame consistent: checker first, then either chat or login.
+  const [isInitialCheck, setIsInitialCheck] = useState<boolean>(true);
 
   const connect = useCallback(async () => {
     setState({ status: "checking" });

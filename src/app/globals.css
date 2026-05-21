@@ -1521,6 +1521,15 @@ button {
   color: var(--vsc-text-emphasis);
 }
 
+.tool-icon-btn.active {
+  background: rgba(167, 139, 250, 0.18);
+  color: var(--bot-accent, #a78bfa);
+}
+
+.tool-icon-btn.active:hover {
+  background: rgba(167, 139, 250, 0.28);
+}
+
 /* --- Edit mode chip (right side) --- */
 
 .edit-mode-chip {
@@ -1996,6 +2005,43 @@ button {
   text-decoration: underline;
 }
 
+.history-project-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--vsc-border);
+  color: var(--vsc-text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-project-switch:hover {
+  background: var(--vsc-hover);
+  color: var(--vsc-text);
+}
+
+.history-project-switch-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-project-switch-caret {
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.history-project-switch-caret.open {
+  transform: rotate(180deg);
+}
+
 .project-custom-form {
   display: flex;
   gap: 6px;
@@ -2298,12 +2344,6 @@ button {
   font-weight: 500;
   min-width: 90px;
   text-align: left;
-}
-
-.connect-check-loader-text::after {
-  content: "…";
-  margin-left: 2px;
-  color: var(--bot-accent);
 }
 
 @keyframes connect-check-pulse {

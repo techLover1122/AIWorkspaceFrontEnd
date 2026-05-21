@@ -47,6 +47,11 @@ type ChatInputProps = {
   isLoading: boolean;
   permissionMode: PermissionMode;
   onToggleMode: () => void;
+  /** Whether tool calls / tool results / thinking blocks are visible in the
+   *  message list. Controlled by the parent so it can also pass the same
+   *  flag into ChatMessages. */
+  showToolDetails: boolean;
+  onToggleToolDetails: () => void;
 };
 
 /* ============================================================
@@ -126,6 +131,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     isLoading,
     permissionMode,
     onToggleMode,
+    showToolDetails,
+    onToggleToolDetails,
   },
   ref
 ) {
@@ -389,8 +396,22 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             </button>
           </div>
 
-          {/* Right: mode + send */}
+          {/* Right: tool-details toggle + mode + send */}
           <div className="composer-toolbar-right">
+            <button
+              type="button"
+              className={`tool-icon-btn${showToolDetails ? " active" : ""}`}
+              onClick={onToggleToolDetails}
+              title={
+                showToolDetails
+                  ? "Hide tool details (tool calls, results, thinking)"
+                  : "Show tool details (tool calls, results, thinking)"
+              }
+              aria-label="Toggle tool details visibility"
+              aria-pressed={showToolDetails}
+            >
+              {showToolDetails ? <IconEye /> : <IconEyeOff />}
+            </button>
             <button
               type="button"
               className="edit-mode-chip"
@@ -526,6 +547,40 @@ function IconCode() {
         strokeWidth="1.4"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconEye() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M1.5 8C2.8 5.2 5.2 3.5 8 3.5s5.2 1.7 6.5 4.5c-1.3 2.8-3.7 4.5-6.5 4.5S2.8 10.8 1.5 8z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+      <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function IconEyeOff() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M3.5 4.5C2.5 5.4 1.8 6.6 1.5 8c1.3 2.8 3.7 4.5 6.5 4.5 1.1 0 2.2-.3 3.1-.8 M14.5 8c-.4-.8-.9-1.5-1.5-2.1 M6 4c.6-.3 1.3-.5 2-.5 2.8 0 5.2 1.7 6.5 4.5"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      <path
+        d="M2 2l12 12"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
       />
     </svg>
   );

@@ -88,9 +88,17 @@ type ChatMessagesProps = {
   messages: ChatMessage[];
   /** Push a previous user message back into the composer for editing/resending. */
   onReuse?: (text: string) => void;
+  /** When false (default), hide tool calls / tool results / thinking blocks so
+   *  the conversation reads as just the user prompt + the assistant's reply.
+   *  Toggled from the composer's eye icon. */
+  showToolDetails?: boolean;
 };
 
-export function ChatMessages({ messages, onReuse }: ChatMessagesProps) {
+export function ChatMessages({
+  messages,
+  onReuse,
+  showToolDetails = false,
+}: ChatMessagesProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -109,7 +117,12 @@ export function ChatMessages({ messages, onReuse }: ChatMessagesProps) {
   return (
     <div className="chat-list" role="log" aria-live="polite">
       {messages.map((msg) => (
-        <Message key={msg.id} message={msg} onReuse={onReuse} />
+        <Message
+          key={msg.id}
+          message={msg}
+          onReuse={onReuse}
+          showToolDetails={showToolDetails}
+        />
       ))}
       <div ref={bottomRef} />
     </div>
@@ -119,10 +132,24 @@ export function ChatMessages({ messages, onReuse }: ChatMessagesProps) {
 function Message({
   message,
   onReuse,
+  showToolDetails,
 }: {
   message: ChatMessage;
   onReuse?: (text: string) => void;
+  showToolDetails: boolean;
 }) {
+  // Internal AI traces — only shown when the user explicitly enables the
+  // detail view from the composer. Default is hidden so the chat reads like
+  // a normal conversation instead of dumping TodoWrite/tool JSON in-line.
+  if (
+    !showToolDetails &&
+    (message.type === "tool" ||
+      message.type === "tool_result" ||
+      message.type === "thinking")
+  ) {
+    return null;
+  }
+
   switch (message.type) {
     case "chat":
       if (message.role === "user") {

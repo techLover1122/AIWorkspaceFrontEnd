@@ -20,6 +20,17 @@ const DEFAULT_CHAT_WIDTH = 380;
 const MIN_CHAT_WIDTH = 280;
 const MAX_CHAT_WIDTH_RATIO = 0.7;
 
+// Monotonic counter so tab IDs stay unique even when several are created
+// inside the same millisecond — e.g. the openedUrls restore loop on mount,
+// or rapid clicks on the "+" button. With plain `Date.now()` those collide
+// and `activeTabId === tab.id` then matches multiple tabs simultaneously,
+// which is what made the whole row look "active" in the bug report.
+let tabIdCounter = 0;
+function nextTabId(): string {
+  tabIdCounter += 1;
+  return `tab-${Date.now()}-${tabIdCounter}`;
+}
+
 /** Convert a Windows path like D:\foo\bar → /mnt/d/foo/bar for WSL code-server. */
 function toCodeServerPath(p: string): string {
   if (!p) return p;
@@ -93,7 +104,7 @@ export function WorkspaceShell({
   const handleAddTab = () => {
     setTabs((currentTabs) => {
       const nextTab: EditorTab = {
-        id: `tab-${Date.now()}`,
+        id: nextTabId(),
         label: "New Tab",
         url: "",
       };
@@ -161,7 +172,7 @@ export function WorkspaceShell({
         setActiveTabId(existing.id);
         return currentTabs;
       }
-      const nextTab: EditorTab = { id: `tab-${Date.now()}`, label, url };
+      const nextTab: EditorTab = { id: nextTabId(), label, url };
       setActiveTabId(nextTab.id);
       return [...currentTabs, nextTab];
     });
