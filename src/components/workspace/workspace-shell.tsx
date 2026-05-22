@@ -7,7 +7,12 @@ import { WorkspaceTabContext } from "../../contexts/WorkspaceTabContext";
 import { ChatPanel } from "./chat-panel";
 import { EditorTabs } from "./editor-tabs";
 import { EditorOverlayToolbar, type EditorOverlayTool } from "./editor-overlay-toolbar";
-import { PreviewPane, type Drawing, type DrawingPoint } from "./preview-pane";
+import {
+  PreviewPane,
+  type Drawing,
+  type DrawingPoint,
+  type Comment,
+} from "./preview-pane";
 import type { EditorTab, TabGroup } from "../../types/types";
 import type { ChatInputHandle } from "../chat/ChatInput";
 import {
@@ -94,13 +99,16 @@ export function WorkspaceShell({
   // Marker strokes drawn over each tab's preview, keyed by tab id. Lives at
   // the workspace level so the strokes survive tab switches.
   const [drawingsByTab, setDrawingsByTab] = useState<Record<string, Drawing[]>>({});
+  // Numbered comment pins per tab. Same lifecycle as drawings — cleared on
+  // collapse, send, or tab close.
+  const [commentsByTab, setCommentsByTab] = useState<Record<string, Comment[]>>({});
   const workspaceRef = useRef<HTMLElement>(null);
 
   // Annotation snapshot — per-tab data URL of the screen-captured iframe
   // pixels. While this is set for a tab, the PreviewPane swaps the live
-  // iframe for the static snapshot + drawing canvas. Cleared by Send (after
-  // attaching to chat) or by Close (discards). Drawings during snapshot
-  // mode live in `drawingsByTab` so they get cleared together.
+  // iframe for the static snapshot + drawing canvas. Also drives whether
+  // the overlay toolbar is expanded: no snapshot → collapsed handle, so a
+  // cancelled permission prompt simply leaves the toolbar closed.
   const [snapshotByTab, setSnapshotByTab] = useState<Record<string, string>>({});
   // Set true around the actual frame grab so the toolbar / overlay UI can
   // hide itself out of the captured pixels.
@@ -146,6 +154,39 @@ export function WorkspaceShell({
     }));
   }, []);
 
+  const addComment = useCallback(
+    (
+      targetTabId: string,
+      comment: { x: number; y: number; text: string }
+    ) => {
+      setCommentsByTab((prev) => ({
+        ...prev,
+        [targetTabId]: [
+          ...(prev[targetTabId] ?? []),
+          {
+            id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            x: comment.x,
+            y: comment.y,
+            text: comment.text,
+          },
+        ],
+      }));
+    },
+    []
+  );
+
+  const removeComment = useCallback(
+    (targetTabId: string, commentId: string) => {
+      setCommentsByTab((prev) => ({
+        ...prev,
+        [targetTabId]: (prev[targetTabId] ?? []).filter(
+          (c) => c.id !== commentId
+        ),
+      }));
+    },
+    []
+  );
+
   // Called when the overlay toolbar expands from its collapsed handle —
   // capture the iframe's currently-rendered pixels (via getDisplayMedia),
   // freeze it as a static image overlay, and auto-select the marker so
@@ -165,15 +206,8 @@ export function WorkspaceShell({
       setSnapshotByTab((prev) => ({ ...prev, [targetId]: dataUrl }));
       setActiveTool("pointer");
     } catch {
-      // User cancelled the picker, or capture failed — silently exit
-      // snapshot mode so the toolbar collapses back to its handle.
-      setSnapshotByTab((prev) => {
-        if (!(targetId in prev)) return prev;
-        const next = { ...prev };
-        delete next[targetId];
-        return next;
-      });
-      setActiveTool(null);
+      // User cancelled the picker, or capture failed — toolbar stays
+      // collapsed because `expanded` is tied to snapshot presence.
     } finally {
       setIsCapturing(false);
     }
@@ -188,8 +222,14 @@ export function WorkspaceShell({
       delete next[targetId];
       return next;
     });
-    // Discard drawings tied to this snapshot session.
+    // Discard drawings + comments tied to this snapshot session.
     setDrawingsByTab((prev) => {
+      if (!(targetId in prev)) return prev;
+      const next = { ...prev };
+      delete next[targetId];
+      return next;
+    });
+    setCommentsByTab((prev) => {
       if (!(targetId in prev)) return prev;
       const next = { ...prev };
       delete next[targetId];
@@ -206,6 +246,10 @@ export function WorkspaceShell({
     const rect = iframe?.getBoundingClientRect();
     const cssW = rect?.width ?? 1280;
     const cssH = rect?.height ?? 800;
+    // Snapshot the comments for this tab before we clear them — we'll
+    // turn them into a numbered prompt so the AI can map each pin in the
+    // image back to the user's text instruction.
+    const tabComments = commentsByTab[targetId] ?? [];
     try {
       const blob = await compositeSnapshotWithSvg(
         snapshot,
@@ -219,6 +263,17 @@ export function WorkspaceShell({
         { type: "image/png" }
       );
       chatInputRef.current?.addImageAttachment(file);
+      if (tabComments.length > 0) {
+        const lines = tabComments.map(
+          (c, i) => `${i + 1}. ${c.text}`
+        );
+        const summary =
+          `On the attached screenshot, the numbered pins mark where I want ` +
+          `changes. Please match each pin to the request below and update ` +
+          `the corresponding code:\n\n` +
+          lines.join("\n");
+        chatInputRef.current?.appendDraft(summary);
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("Failed to composite snapshot for chat", err);
@@ -238,8 +293,14 @@ export function WorkspaceShell({
         delete next[targetId];
         return next;
       });
+      setCommentsByTab((prev) => {
+        if (!(targetId in prev)) return prev;
+        const next = { ...prev };
+        delete next[targetId];
+        return next;
+      });
     }
-  }, [activeTabId, snapshotByTab]);
+  }, [activeTabId, snapshotByTab, commentsByTab]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(CHAT_WIDTH_KEY);
@@ -419,6 +480,12 @@ export function WorkspaceShell({
         delete next[tabId];
         return next;
       });
+      setCommentsByTab((prev) => {
+        if (!(tabId in prev)) return prev;
+        const next = { ...prev };
+        delete next[tabId];
+        return next;
+      });
       delete iframeRefs.current[tabId];
       delete drawingSvgRefs.current[tabId];
 
@@ -583,6 +650,9 @@ export function WorkspaceShell({
                   drawings={drawingsByTab[tab.id]}
                   onAddDrawing={(points) => addDrawing(tab.id, points)}
                   onRemoveDrawing={(id) => removeDrawing(tab.id, id)}
+                  comments={commentsByTab[tab.id]}
+                  onAddComment={(c) => addComment(tab.id, c)}
+                  onRemoveComment={(id) => removeComment(tab.id, id)}
                   snapshot={snapshotByTab[tab.id]}
                   onElementsReady={(els) =>
                     registerPreviewElements(tab.id, els)

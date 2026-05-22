@@ -153,7 +153,13 @@ function Message({
   switch (message.type) {
     case "chat":
       if (message.role === "user") {
-        return <UserMessage content={message.content} onReuse={onReuse} />;
+        return (
+          <UserMessage
+            content={message.content}
+            imageUrls={message.imageUrls}
+            onReuse={onReuse}
+          />
+        );
       }
       // While streaming with no text yet, nothing renders here — the
       // typing indicator above the composer handles the "busy" state.
@@ -242,12 +248,15 @@ function Message({
 
 function UserMessage({
   content,
+  imageUrls,
   onReuse,
 }: {
   content: string;
+  imageUrls?: string[];
   onReuse?: (text: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [zoomedUrl, setZoomedUrl] = useState<string | null>(null);
 
   const handleCopy = async () => {
     try {
@@ -347,8 +356,36 @@ function UserMessage({
             </button>
           </span>
         </div>
-        <div className="msg-user-text">{content}</div>
+        {content && <div className="msg-user-text">{content}</div>}
+        {imageUrls && imageUrls.length > 0 && (
+          <div className="msg-user-images">
+            {imageUrls.map((url, i) => (
+              <button
+                key={i}
+                type="button"
+                className="msg-user-image-thumb"
+                onClick={() => setZoomedUrl(url)}
+                title="Click to enlarge"
+                aria-label="View attached image"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt="attachment" />
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+      {zoomedUrl && (
+        <div
+          className="msg-user-image-zoom"
+          onClick={() => setZoomedUrl(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={zoomedUrl} alt="attachment full size" />
+        </div>
+      )}
     </div>
   );
 }

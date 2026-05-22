@@ -22,6 +22,11 @@ import type { PermissionMode } from "../../types/types";
 export type ChatInputHandle = {
   /** Replace the textarea content and focus it. */
   setDraft: (text: string) => void;
+  /** Append text to the existing draft (with a blank line separator if
+   *  there's already content). Used by the comments-on-snapshot flow so
+   *  user-typed prompts don't get overwritten by the auto-generated
+   *  annotation summary. */
+  appendDraft: (text: string) => void;
   /** Add an image attachment to the composer (used by the annotation
    *  snapshot flow to drop a screenshot into the next message). */
   addImageAttachment: (file: File) => void;
@@ -160,6 +165,22 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           if (!el) return;
           el.focus();
           el.setSelectionRange(value.length, value.length);
+          el.style.height = "auto";
+          el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
+        });
+      },
+      appendDraft: (textToAppend: string) => {
+        setText((prev) => {
+          const trimmed = prev.replace(/\s+$/, "");
+          return trimmed
+            ? `${trimmed}\n\n${textToAppend}`
+            : textToAppend;
+        });
+        requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          if (!el) return;
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
           el.style.height = "auto";
           el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
         });

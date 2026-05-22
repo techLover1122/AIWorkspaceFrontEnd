@@ -257,20 +257,14 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
 
       const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-      // User-visible message in the chat history. We include a brief note
-      // about any attached images so the transcript reads sensibly without
-      // dumping their bytes.
-      const displayMessage = imageAttachments.length > 0
-        ? [
-            composed,
-            composed ? "" : null,
-            `[${imageAttachments.length} image${imageAttachments.length === 1 ? "" : "s"} attached]`,
-            ...imageAttachments.map((a) => `- ${a.name}${a.meta ? ` (${a.meta})` : ""}`),
-          ]
-            .filter((s) => s !== null)
-            .join("\n")
-        : composed;
-      addMessage(createUserMessage(displayMessage));
+      // User-visible message in the chat history. Image attachments render
+      // as inline thumbnails (data URLs collected from each Attachment's
+      // preview), so the transcript stays clean — no "[1 image attached]"
+      // / filename noise above the prompt text.
+      const imagePreviewUrls = imageAttachments
+        .map((a) => a.preview)
+        .filter((p): p is string => !!p);
+      addMessage(createUserMessage(composed, imagePreviewUrls));
 
       setCurrentRequestId(requestId);
       setLoading(true);

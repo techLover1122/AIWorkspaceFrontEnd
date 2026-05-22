@@ -29,6 +29,10 @@ export type ChatMessage = {
     summary?: string;
     isError?: boolean;
   };
+  /** Inline image attachments (data URLs) — used for user messages so the
+   *  composer can show small thumbnails instead of dumping the filename as
+   *  text in the chat transcript. */
+  imageUrls?: string[];
 };
 
 export type StreamResponse = {

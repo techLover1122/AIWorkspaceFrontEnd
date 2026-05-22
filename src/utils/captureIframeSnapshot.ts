@@ -34,18 +34,26 @@ export async function captureIframeSnapshot({
   // 1. Request the user's screen / window / tab. preferCurrentTab is a
   //    Chrome extension that auto-selects this tab when the user has
   //    previously granted permission for it.
+  //
+  //    `cursor: "never"` is what actually keeps the OS cursor out of the
+  //    captured pixels — without it, the mouse pointer bakes into the
+  //    snapshot. Chrome honors it since ~v92; other browsers ignore
+  //    unknown constraints.
   const stream = await navigator.mediaDevices.getDisplayMedia({
     video: {
       // hint at "browser tab" so the picker emphasises that option
       // @ts-ignore — displaySurface is in the spec but not in all TS libs
       displaySurface: "browser",
+      // @ts-ignore — strip the OS cursor from the captured frames
+      cursor: "never",
     },
     audio: false,
     // @ts-ignore — Chrome-only constraint
     preferCurrentTab: true,
     // @ts-ignore — also Chrome-only, biases the picker further
     selfBrowserSurface: "include",
-    // @ts-ignore — Chrome-only, suppresses cursor capture
+    // @ts-ignore — Chrome-only, locks the surface picker after the first
+    // grant so the user can't accidentally switch mid-flow.
     surfaceSwitching: "exclude",
   });
 

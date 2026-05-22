@@ -1,6 +1,6 @@
 "use client";
 
-export type EditorOverlayTool = "pointer" | "select" | "comments";
+export type EditorOverlayTool = "pointer" | "comments";
 
 type EditorOverlayToolbarProps = {
   /** Whether the toolbar is showing its full toolset (true) or just the
@@ -97,16 +97,6 @@ export function EditorOverlayToolbar({
       </button>
       <button
         type="button"
-        className={`overlay-toolbar-btn${activeTool === "select" ? " active" : ""}`}
-        onClick={() => toggleTool("select")}
-        title="Select"
-        aria-label="Select"
-        aria-pressed={activeTool === "select"}
-      >
-        <IconSelect />
-      </button>
-      <button
-        type="button"
         className={`overlay-toolbar-btn${activeTool === "comments" ? " active" : ""}`}
         onClick={() => toggleTool("comments")}
         title="Comments"
@@ -189,18 +179,6 @@ function IconPointer() {
         strokeWidth="1.6"
         strokeLinecap="round"
         opacity="0.6"
-      />
-    </svg>
-  );
-}
-
-function IconSelect() {
-  // Plain arrow pointer — no tail / click-stick on the back.
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M3 2.5l10 5.5-4.5 1.2L7 13.5z"
-        fill="currentColor"
       />
     </svg>
   );

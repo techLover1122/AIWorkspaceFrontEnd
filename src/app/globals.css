@@ -578,6 +578,13 @@ button {
   /* Anchor for the cursor overlay that sits above the iframe when an
      overlay-toolbar tool is active. */
   position: relative;
+  /* `z-index: 0` (with position:relative) forces a new stacking context.
+     Without it, the high-z overlays we render here (DrawingSurface z 11,
+     AnnotationsLayer z 10) escape to the .editor stacking context and
+     end up ABOVE the floating EditorOverlayToolbar (z 10) — which makes
+     the marker cursor bleed onto the toolbar and swallows clicks on its
+     buttons. Isolating the stack here keeps inner overlays scoped. */
+  z-index: 0;
 }
 
 .preview-iframe {
@@ -586,12 +593,126 @@ button {
   background: #ffffff;
 }
 
-.preview-cursor-overlay {
+/* Click surface for the comments tool — sits below the annotations SVG
+   so existing pins remain hoverable for delete, but above the snapshot
+   so clicks on empty area create a new draft pin. */
+.preview-comments-surface {
   position: absolute;
   inset: 0;
   background: transparent;
-  /* Tool cursor is applied inline via the `cursor` style. */
-  z-index: 5;
+  z-index: 4;
+}
+
+/* Floating draft popover anchored to a not-yet-committed comment pin.
+   The pin dot sits at (left, top); the input card hangs off to the
+   right with a slight offset so it doesn't cover the click target. */
+.preview-comment-draft {
+  position: absolute;
+  z-index: 12;
+  pointer-events: auto;
+  /* Translate so (x, y) lands on the pin dot's centre, while the card
+     itself extends to the right/below from there. */
+  transform: translate(-12px, -12px);
+}
+
+.preview-comment-draft-pin {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #7c3aed;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  left: 0;
+  top: 0;
+}
+
+.preview-comment-draft-card {
+  position: absolute;
+  /* left/top/right/bottom are set inline so the card can flip to the
+     opposite side when the default placement would overflow the iframe. */
+  width: 260px;
+  background: var(--vsc-bg-elev, #1f1f1f);
+  border: 1px solid rgba(124, 58, 237, 0.55);
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preview-comment-draft-input {
+  width: 100%;
+  resize: none;
+  min-height: 56px;
+  max-height: 200px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--vsc-text-emphasis, #fff);
+  border: 1px solid var(--vsc-border, rgba(255, 255, 255, 0.12));
+  border-radius: 5px;
+  outline: none;
+}
+
+.preview-comment-draft-input:focus {
+  border-color: rgba(124, 58, 237, 0.7);
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.35);
+}
+
+/* Match the chat composer's slim webkit scrollbar so the popover feels
+   like the same family of input as the main chat box. */
+.preview-comment-draft-input::-webkit-scrollbar {
+  width: 8px;
+}
+
+.preview-comment-draft-input::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 4px;
+}
+
+.preview-comment-draft-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.preview-comment-draft-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.preview-comment-draft-btn.cancel {
+  background: transparent;
+  color: var(--vsc-text, #ddd);
+  border-color: var(--vsc-border, rgba(255, 255, 255, 0.14));
+}
+
+.preview-comment-draft-btn.cancel:hover {
+  background: var(--vsc-hover, rgba(255, 255, 255, 0.06));
+}
+
+.preview-comment-draft-btn.primary {
+  background: #7c3aed;
+  color: #ffffff;
+  border-color: rgba(124, 58, 237, 0.85);
+}
+
+.preview-comment-draft-btn.primary:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
+.preview-comment-draft-btn.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Captured snapshot displayed in place of the live iframe during the
@@ -618,7 +739,11 @@ button {
   inset: 0;
   width: 100%;
   height: 100%;
-  z-index: 4;
+  /* Highest among the in-iframe overlays so existing pins / strokes stay
+     hoverable regardless of which tool surface (marker / comments /
+     select) is mounted below. Root has pointer-events:none so it never
+     blocks clicks on empty areas. */
+  z-index: 10;
 }
 
 /* Live drawing capture surface — only mounted while the marker tool is
@@ -628,7 +753,12 @@ button {
   position: absolute;
   inset: 0;
   background: transparent;
-  z-index: 6;
+  /* Above the annotations SVG (z 10) so the surface unconditionally
+     catches pointermove during a stroke — when an existing pin / drawing
+     sits in the SVG above the surface, even `pointer-events:none` can
+     occasionally lose mid-drag events in some browsers, breaking the
+     line. Keeping the surface on top side-steps that entirely. */
+  z-index: 11;
   /* `pan-x pan-y` lets the user scroll the wrapper with touchpad / touch
      while the surface still captures pointer-down for drawing. */
   touch-action: pan-x pan-y;
@@ -1300,6 +1430,61 @@ button {
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Inline image attachments inside a user message — rendered as small
+   square thumbnails below the text. Clicking opens a fullscreen zoom. */
+.msg-user-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.msg-user-image-thumb {
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid var(--vsc-border);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: zoom-in;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.msg-user-image-thumb:hover {
+  border-color: rgba(55, 148, 255, 0.6);
+  transform: scale(1.04);
+}
+
+.msg-user-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Fullscreen zoom overlay shown when the user clicks a thumbnail. Click
+   anywhere to dismiss. */
+.msg-user-image-zoom {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  cursor: zoom-out;
+  padding: 32px;
+}
+
+.msg-user-image-zoom img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
 /* --- Assistant message --- */

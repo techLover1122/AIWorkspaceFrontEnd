@@ -8,13 +8,17 @@ function nextId(): string {
   return `msg_${Date.now()}_${++idCounter}`;
 }
 
-export function createUserMessage(text: string): ChatMessage {
+export function createUserMessage(
+  text: string,
+  imageUrls?: string[]
+): ChatMessage {
   return {
     id: nextId(),
     type: "chat",
     role: "user",
     content: text,
     timestamp: Date.now(),
+    ...(imageUrls && imageUrls.length > 0 ? { imageUrls } : {}),
   };
 }
 
