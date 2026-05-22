@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { ChatMessage } from "../../types/types";
+import { INSTANCE_IP } from "../../constant/api";
 import { useWorkspaceTab } from "../../contexts/WorkspaceTabContext";
 import { AnimatedAIBot } from "./AnimatedAIBot";
 import { MarkdownContent } from "./MarkdownContent";
@@ -11,14 +12,18 @@ import {
   prettyToolInput,
 } from "../../utils/toolUtils";
 
-/** Extract unique localhost URLs from Claude's text response. */
+/** Extract unique localhost URLs from Claude's text response.
+ *  The regex still matches the literal "localhost" because that's what
+ *  dev servers print — but the URL we emit for the click chip is
+ *  rewritten to use INSTANCE_IP so the link actually works when the
+ *  user's browser isn't on the same machine as the dev server. */
 function extractLocalhostUrls(text: string): { url: string; port: string }[] {
   const regex = /https?:\/\/localhost:(\d{2,5})(?:\/[^\s)>\]"']*)?/g;
   const seen = new Set<string>();
   const results: { url: string; port: string }[] = [];
   let match;
   while ((match = regex.exec(text)) !== null) {
-    const base = `http://localhost:${match[1]}`;
+    const base = `http://${INSTANCE_IP}:${match[1]}`;
     if (!seen.has(base)) {
       seen.add(base);
       results.push({ url: base, port: match[1] });

@@ -9,7 +9,7 @@ import type {
 } from "../../types/types";
 import { useClaudeStreaming } from "../../hooks/useClaudeStreaming";
 import { useChatState, createUserMessage } from "../../hooks/useChatState";
-import { conversationUrl, permissionDecisionUrl, portScanUrl } from "../../constant/api";
+import { INSTANCE_IP, conversationUrl, permissionDecisionUrl, portScanUrl } from "../../constant/api";
 import { convertHistoryMessages } from "../../utils/messageConverter";
 import { ChatMessages } from "../chat/ChatMessages";
 import {
@@ -213,7 +213,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       }
       const lines = ports.map((p) => {
         const name = p.title || p.appLabel || (p.processName ?? "").replace(/\.exe$/i, "") || "Server";
-        return `- **${name}** → http://localhost:${p.port}`;
+        return `- **${name}** → http://${INSTANCE_IP}:${p.port}`;
       });
       addMessage({
         id: `asst_${Date.now()}`,

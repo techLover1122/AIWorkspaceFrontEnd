@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { urlsUrl, urlByIdUrl } from "../../constant/api";
+import { INSTANCE_IP, urlsUrl, urlByIdUrl } from "../../constant/api";
 
 type NewTabPageProps = {
   codeServerUrl: string;
@@ -19,7 +19,7 @@ type SavedUrl = {
 function urlFromInput(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "";
-  if (/^\d+$/.test(trimmed)) return `http://localhost:${trimmed}`;
+  if (/^\d+$/.test(trimmed)) return `http://${INSTANCE_IP}:${trimmed}`;
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
   return `http://${trimmed}`;
 }

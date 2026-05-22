@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { portScanUrl } from "../../constant/api";
+import { INSTANCE_IP, portScanUrl } from "../../constant/api";
 
 type DetectedPort = {
   port: number;
@@ -191,7 +191,7 @@ export function PortsView({ onOpen }: PortsViewProps) {
       ) : (
         <div className="ports-view-grid">
           {detected.map((p) => {
-            const url = `http://localhost:${p.port}`;
+            const url = `http://${INSTANCE_IP}:${p.port}`;
             const label = p.title || p.appLabel || (p.processName ?? "").replace(/\.exe$/i, "") || "Server";
             const style = styleForPort(p);
             return (

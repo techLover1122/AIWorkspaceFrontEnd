@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { WorkspaceShell } from "../components/workspace/workspace-shell";
+import { INSTANCE_IP } from "../constant/api";
 import { base64UrlDecode, base64UrlEncode } from "../constant/utils";
 
 export function HomePageClient() {
@@ -10,7 +11,7 @@ export function HomePageClient() {
   const searchParams = useSearchParams();
   const projectEncoded = searchParams.get("project");
   const codeServerUrl =
-    process.env.NEXT_PUBLIC_CODE_SERVER_URL ?? "http://localhost:8080";
+    process.env.NEXT_PUBLIC_CODE_SERVER_URL ?? `http://${INSTANCE_IP}:8080`;
 
   let workingDirectory: string | undefined;
   if (projectEncoded) {

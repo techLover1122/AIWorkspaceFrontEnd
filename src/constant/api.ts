@@ -1,4 +1,14 @@
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8090";
+/**
+ * Resolve the host the user's browser uses to reach our services.
+ * Defaults to `localhost` for local dev; on EC2 / staging, set
+ * `NEXT_PUBLIC_INSTANCE_IP` to the public IP (or hostname) so URLs
+ * embedded in the bundle point at the real machine.
+ *
+ * Port numbers stay per-service — only the host part is variable.
+ */
+export const INSTANCE_IP = process.env.NEXT_PUBLIC_INSTANCE_IP ?? "localhost";
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? `http://${INSTANCE_IP}:8090`;
 
 export function statusUrl(): string {
   return `${BACKEND_URL}/api/status`;
