@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AskUserQuestionRequest,
   ChatMessage,
@@ -9,7 +9,7 @@ import type {
 } from "../../types/types";
 import { useClaudeStreaming } from "../../hooks/useClaudeStreaming";
 import { useChatState, createUserMessage } from "../../hooks/useChatState";
-import { INSTANCE_IP, conversationUrl, permissionDecisionUrl, portScanUrl } from "../../constant/api";
+import { INSTANCE_IP, conversationUrl, eventsUrl, permissionDecisionUrl, portScanUrl } from "../../constant/api";
 import { convertHistoryMessages } from "../../utils/messageConverter";
 import { ChatMessages } from "../chat/ChatMessages";
 import {
@@ -347,26 +347,77 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
     setAskQuestion(null);
   }, [addMessage]);
 
+  // Slugs we've recently notified the AI about — prevents a double-notify
+  // when a pack is installed via the modal (which calls this directly) AND
+  // arrives via SSE moments later. 30-second TTL is plenty.
+  const recentlyNotifiedPacks = useRef<Map<string, number>>(new Map());
+
   const handlePackInstalled = useCallback(
-    (pack: InstalledPack) => {
+    (pack: { name: string; slug: string; description?: string; hasInstall: boolean; installedAt: string }) => {
+      const now = Date.now();
+      const last = recentlyNotifiedPacks.current.get(pack.slug);
+      if (last && now - last < 30_000) return;
+      recentlyNotifiedPacks.current.set(pack.slug, now);
+
       addMessage({
-        id: `sys_${Date.now()}`,
+        id: `sys_${now}`,
         type: "system",
         content: `Environment pack "${pack.name}" installed at ${pack.installedAt}.`,
-        timestamp: Date.now(),
+        timestamp: now,
       });
-      const message = pack.hasInstall
-        ? `An environment pack named "${pack.name}" was just installed at ~/.claude/skills/${pack.slug}/.\n\n` +
-          `Please read ~/.claude/skills/${pack.slug}/INSTALL.md and run the install steps it describes ` +
-          `using your shell tools. Confirm with me before each command that modifies the system. ` +
-          `After install completes, run a brief verification and summarize what was installed.`
-        : `An environment pack named "${pack.name}" was just installed at ~/.claude/skills/${pack.slug}/. ` +
-          `It does not include an INSTALL.md, so no install steps are required. ` +
-          `Read ~/.claude/skills/${pack.slug}/SKILL.md so you know what this pack provides.`;
+
+      // The system prompt already directs the model to "follow packs
+      // verbatim, don't substitute". This message ties THAT directive to
+      // THIS specific newly-installed pack so the model can't claim it
+      // didn't know.
+      const desc = pack.description ? `\n\nPack description: ${pack.description}` : "";
+      const installSteps = pack.hasInstall
+        ? `\n\nThis pack includes an INSTALL.md. Read ~/.claude/skills/${pack.slug}/INSTALL.md and run the install steps it describes using your shell tools. Confirm with me before each command that modifies the system. After install completes, run a brief verification and summarize what was installed.`
+        : `\n\nThis pack has no INSTALL.md, so no install steps are needed right now.`;
+
+      const message =
+        `[SYSTEM NOTIFICATION] A new environment pack "${pack.name}" was just installed at ~/.claude/skills/${pack.slug}/.${desc}` +
+        installSteps +
+        `\n\nFrom now on in our conversation: ` +
+        `when *I* leave a tool choice open (e.g. "give me a database viewer"), ` +
+        `default to this pack's recommendations instead of picking on your own. ` +
+        `If you'd prefer something else over the pack's choice, tell me first ` +
+        `and wait for my reply.` +
+        `\n\nIf I explicitly ask for a different tool (e.g. "install pgweb"), ` +
+        `just do what I asked — don't push the pack's choice. You can mention ` +
+        `the conflict once after the fact, briefly, then drop it.` +
+        `\n\nStart by calling list_environment_packs (and Read ~/.claude/skills/${pack.slug}/SKILL.md if you need detail) to confirm what was installed, then continue the current task — or, if no task is in flight, just acknowledge.`;
       handleSend(message, []);
     },
     [addMessage, handleSend]
   );
+
+  // Listen for pack-install events from any path (CLI / API / modal).
+  // The modal also calls handlePackInstalled directly for immediate UX,
+  // but the de-dup map above prevents a double-message.
+  useEffect(() => {
+    const es = new EventSource(eventsUrl());
+    es.onmessage = (e) => {
+      try {
+        const evt = JSON.parse(e.data) as
+          | { type: "pack_installed"; name: string; slug: string; description: string; hasInstall: boolean; installedAt: string }
+          | { type: string };
+        if (evt.type === "pack_installed") {
+          const p = evt as Extract<typeof evt, { type: "pack_installed" }>;
+          handlePackInstalled({
+            name: p.name,
+            slug: p.slug,
+            description: p.description,
+            hasInstall: p.hasInstall,
+            installedAt: p.installedAt,
+          });
+        }
+      } catch {
+        // ignore malformed events
+      }
+    };
+    return () => es.close();
+  }, [handlePackInstalled]);
 
   const toggleMode = useCallback(() => {
     setPermissionMode((prev) =>

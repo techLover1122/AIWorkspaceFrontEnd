@@ -6,6 +6,7 @@ import { installPackUrl } from "../../constant/api";
 export type InstalledPack = {
   name: string;
   slug: string;
+  description?: string;
   hasInstall: boolean;
   source: "github" | "zip" | "git";
   installedAt: string;
