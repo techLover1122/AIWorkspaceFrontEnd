@@ -8,6 +8,22 @@
  */
 export const INSTANCE_IP = process.env.NEXT_PUBLIC_INSTANCE_IP ?? "localhost";
 
+/**
+ * The workspace owner's user id (Mongo _id, 24-char hex). Used to recognise
+ * platform-internal URLs of the form `<service>-<USER_ID>.<PLATFORM_DOMAIN>`
+ * so we can ensure they're registered before opening as a tab.
+ *
+ * Empty string in dev — the platform-URL detection in registerService.ts
+ * is gated on this being non-empty.
+ */
+export const USER_ID = process.env.NEXT_PUBLIC_USER_ID ?? "";
+
+/**
+ * Apex domain this workspace lives under (e.g. `platform.bytescripterz.com`).
+ * Same purpose as USER_ID — used to detect platform-internal URLs.
+ */
+export const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN ?? "";
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? `http://${INSTANCE_IP}:8090`;
 
 export function statusUrl(): string {

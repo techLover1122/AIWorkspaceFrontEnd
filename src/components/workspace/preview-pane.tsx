@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { NewTabPage } from "./new-tab-page";
 import { PortsView } from "./PortsView";
 import { useWorkspaceTab } from "../../contexts/WorkspaceTabContext";
@@ -146,6 +146,23 @@ export function PreviewPane({
     );
   }
 
+  // Reload the iframe by re-assigning src to itself. Works even when the
+  // iframe is cross-origin (which it always is here — every service runs
+  // on a per-user subdomain different from the parent). contentWindow.
+  // location.reload() would throw a SecurityError in that case.
+  const handleReload = useCallback(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    // Bouncing src forces a fresh navigation. `iframe.src = iframe.src`
+    // alone sometimes no-ops in Chromium when the URL is identical, so
+    // null-then-set unambiguously triggers a load.
+    const u = iframe.src;
+    iframe.src = "about:blank";
+    requestAnimationFrame(() => {
+      iframe.src = u;
+    });
+  }, []);
+
   // Layered above the iframe (low → high z-index):
   //   1. <iframe> — the live preview (or hidden behind snapshot)
   //   2. <img snapshot> — frozen pixels when snapshot mode is active
@@ -155,6 +172,8 @@ export function PreviewPane({
   //      surfaces so existing pins remain hoverable for delete-X even
   //      while a tool is active
   //   6. comment draft popover — text input attached to the draft pin
+  //   7. floating reload button — top-right, suppressed while a snapshot
+  //      is being annotated so it doesn't sit on top of the static image
   return (
     <div className="preview-frame" style={hiddenStyle}>
       <div className="preview-content">
@@ -169,6 +188,27 @@ export function PreviewPane({
           // behind the static image.
           style={snapshot ? { visibility: "hidden" } : undefined}
         />
+
+        {!snapshot && (
+          <button
+            type="button"
+            className="preview-reload-btn"
+            onClick={handleReload}
+            title="Reload this tab"
+            aria-label="Reload this tab"
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
+              <path
+                d="M3 8a5 5 0 0 1 9-3M13 3v3h-3M13 8a5 5 0 0 1-9 3M3 13v-3h3"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+            </svg>
+          </button>
+        )}
 
         {snapshot && (
           <img
