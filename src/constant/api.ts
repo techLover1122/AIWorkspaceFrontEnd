@@ -66,6 +66,14 @@ export function logTabUrl(): string {
   return `${BACKEND_URL}/api/tabs/log`;
 }
 
+export function registerServiceUrl(): string {
+  return `${BACKEND_URL}/api/services`;
+}
+
+export function listServicesUrl(): string {
+  return `${BACKEND_URL}/api/services`;
+}
+
 export function urlsUrl(): string {
   return `${BACKEND_URL}/api/urls`;
 }

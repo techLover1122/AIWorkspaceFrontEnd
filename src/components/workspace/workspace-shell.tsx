@@ -3,6 +3,7 @@
 import { DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { createInitialTabs } from "../../constant/constants";
 import { logTabUrl, openedUrlsUrl, setOpenedUrl, urlsUrl, eventsUrl } from "../../constant/api";
+import { toPublicServiceUrl } from "../../utils/registerService";
 import { WorkspaceTabContext } from "../../contexts/WorkspaceTabContext";
 import { ChatPanel } from "./chat-panel";
 import { EditorTabs } from "./editor-tabs";
@@ -389,26 +390,33 @@ export function WorkspaceShell({
   );
 
   // Called from chat / context — opens a URL in a new tab (or switches if already open).
-  const handleOpenTab = useCallback((url: string, label: string) => {
-    // Side effects fire upfront (outside the state updater)
-    fetch(logTabUrl(), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, label, projectPath: workingDirectory }),
-    }).catch(() => { /* ignore */ });
-    ensureBookmark(url, label);
-    markUrlOpened(url, true);
+  // Any caller (PortsView, chat, MCP open_tab SSE event) can pass a raw
+  // ip:port URL; we translate it to the public domain URL here, registering
+  // the port as a service if it isn't already. External URLs (no port, or
+  // non-local host) pass through unchanged.
+  const handleOpenTab = useCallback((rawUrl: string, label: string) => {
+    void (async () => {
+      const url = await toPublicServiceUrl(rawUrl);
 
-    setTabs((currentTabs) => {
-      const existing = currentTabs.find((t) => t.url === url);
-      if (existing) {
-        setActiveTabId(existing.id);
-        return currentTabs;
-      }
-      const nextTab: EditorTab = { id: nextTabId(), label, url };
-      setActiveTabId(nextTab.id);
-      return [...currentTabs, nextTab];
-    });
+      fetch(logTabUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, label, projectPath: workingDirectory }),
+      }).catch(() => { /* ignore */ });
+      ensureBookmark(url, label);
+      markUrlOpened(url, true);
+
+      setTabs((currentTabs) => {
+        const existing = currentTabs.find((t) => t.url === url);
+        if (existing) {
+          setActiveTabId(existing.id);
+          return currentTabs;
+        }
+        const nextTab: EditorTab = { id: nextTabId(), label, url };
+        setActiveTabId(nextTab.id);
+        return [...currentTabs, nextTab];
+      });
+    })();
   }, [workingDirectory, markUrlOpened, ensureBookmark]);
 
   // Restore previously open tabs on app load.

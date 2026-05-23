@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { INSTANCE_IP, portScanUrl } from "../../constant/api";
+import { toPublicServiceUrl } from "../../utils/registerService";
 
 type DetectedPort = {
   port: number;
@@ -191,16 +192,23 @@ export function PortsView({ onOpen }: PortsViewProps) {
       ) : (
         <div className="ports-view-grid">
           {detected.map((p) => {
-            const url = `http://${INSTANCE_IP}:${p.port}`;
+            const rawUrl = `http://${INSTANCE_IP}:${p.port}`;
             const label = p.title || p.appLabel || (p.processName ?? "").replace(/\.exe$/i, "") || "Server";
             const style = styleForPort(p);
+            const handleClick = async () => {
+              // Register the port as a service first so the tab opens on
+              // the public domain URL, not the raw EC2 ip:port (which is
+              // CORS-fragile and changes when the instance is recycled).
+              const url = await toPublicServiceUrl(rawUrl);
+              onOpen(url, `${label} :${p.port}`);
+            };
             return (
               <button
                 key={`${p.port}-${p.pid ?? "0"}`}
                 type="button"
                 className="ports-view-card"
                 style={{ "--ntp-card-accent": style.accent } as React.CSSProperties}
-                onClick={() => onOpen(url, `${label} :${p.port}`)}
+                onClick={handleClick}
                 title={`${label} · PID ${p.pid ?? "?"} · ${p.address}:${p.port}`}
               >
                 <span className="ports-view-card-icon">{style.icon}</span>
