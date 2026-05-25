@@ -614,24 +614,43 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
           )}
         </span>
         <span className="chat-panel-actions">
-          {isConnected &&
-            connection.status === "connected" &&
-            connection.authMethod === "api_key" &&
-            connection.apiKeyMasked && (
-              <span
-                className="chat-auth-chip"
-                title="Connected via Anthropic API key"
-              >
+          {isConnected && connection.status === "connected" && (() => {
+            // Show an auth chip with a disconnect button for any signed-in
+            // user — API-key OR Claude.ai subscription. Clicking the chip's
+            // × calls `connection.disconnect()`, which clears localStorage
+            // + backend credentials, flips state back to "idle", and lets
+            // the panel re-render the ConnectScreen automatically.
+            //
+            // Re-checking status inside the IIFE so TypeScript narrows
+            // `connection` to the "connected" variant within this scope —
+            // discriminated-union narrowing doesn't carry across the arrow
+            // function boundary from the outer && chain.
+            if (connection.status !== "connected") return null;
+            const authMethod = connection.authMethod;
+            const apiKeyMasked = connection.apiKeyMasked;
+
+            const isApiKey = authMethod === "api_key" && !!apiKeyMasked;
+            const isSubscription = authMethod === "subscription";
+            if (!isApiKey && !isSubscription) return null;
+
+            const label = isApiKey ? apiKeyMasked : "Claude.ai";
+            const chipTitle = isApiKey
+              ? "Connected via Anthropic API key"
+              : "Connected via Claude.ai subscription";
+            const disconnectTitle = isApiKey
+              ? "Log out (disconnect API key)"
+              : "Log out (disconnect Claude.ai)";
+
+            return (
+              <span className="chat-auth-chip" title={chipTitle}>
                 <span className="chat-auth-chip-dot" aria-hidden />
-                <span className="chat-auth-chip-label">
-                  {connection.apiKeyMasked}
-                </span>
+                <span className="chat-auth-chip-label">{label}</span>
                 <button
                   type="button"
                   className="chat-auth-chip-disconnect"
                   onClick={() => void connection.disconnect()}
-                  title="Disconnect API key"
-                  aria-label="Disconnect API key"
+                  title={disconnectTitle}
+                  aria-label={disconnectTitle}
                 >
                   <svg
                     viewBox="0 0 16 16"
@@ -649,7 +668,8 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
                   </svg>
                 </button>
               </span>
-            )}
+            );
+          })()}
           {onChangeProject && (
             <button
               type="button"
