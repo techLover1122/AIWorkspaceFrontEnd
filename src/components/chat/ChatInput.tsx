@@ -45,7 +45,7 @@ export type Attachment = {
   kind: "image" | "file";
 };
 
-export type SlashCommand = "clear" | "history" | "project" | "help" | "ports";
+export type SlashCommand = "clear" | "history" | "project" | "help" | "ports" | "logout";
 
 type ChatInputProps = {
   onSend: (message: string, attachments: Attachment[]) => void;
@@ -71,6 +71,7 @@ const SLASH_COMMANDS: { cmd: SlashCommand; label: string; hint: string }[] = [
   { cmd: "history", label: "/history", hint: "Open session history" },
   { cmd: "project", label: "/project", hint: "Switch working directory" },
   { cmd: "ports", label: "/ports", hint: "List all running web servers" },
+  { cmd: "logout", label: "/logout", hint: "Sign out of Claude (back to login screen)" },
   { cmd: "help", label: "/help", hint: "Insert a help prompt" },
 ];
 

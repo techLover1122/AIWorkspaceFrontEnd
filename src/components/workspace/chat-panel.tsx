@@ -434,14 +434,31 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       const req = permissionRequest;
       setPermissionRequest(null);
 
-      // "Allow permanently" pipes the SDK-provided permission `suggestions`
-      // back as `updatedPermissions` — the SDK persists them properly. We
-      // don't maintain our own allow-list anymore (the bare allowedTools
-      // approach never satisfied per-path / compound-Bash gates anyway).
-      const body =
-        persist && req.suggestions && req.suggestions.length > 0
-          ? { behavior: "allow", updatedPermissions: req.suggestions }
-          : { behavior: "allow" };
+      // "Allow permanently" should mean "stop asking me for THIS TOOL for
+      // the rest of the session" — what the user actually expects from the
+      // label. The SDK's `suggestions` are intentionally narrow (specific
+      // command patterns, specific paths, sometimes flagged for obfuscation
+      // like the Bash "${VAR}" expansion gate). Passing those back as-is
+      // only allows that one exact pattern — the next slightly-different
+      // Bash command re-prompts, which feels broken.
+      //
+      // Instead, build a single broad `addRules` PermissionUpdate that
+      // allows the whole tool with NO ruleContent (rule matches any input)
+      // and merge whatever the SDK suggested on top for extra coverage.
+      // Destination "session" keeps the scope local to this chat — won't
+      // leak into the user's global ~/.claude config.
+      const broadRule = {
+        type: "addRules" as const,
+        rules: [{ toolName: req.toolName }],
+        behavior: "allow" as const,
+        destination: "session" as const,
+      };
+      const body = persist
+        ? {
+            behavior: "allow" as const,
+            updatedPermissions: [broadRule, ...(req.suggestions ?? [])],
+          }
+        : { behavior: "allow" as const };
 
       // eslint-disable-next-line no-console
       console.log("[permission:allow]", {
@@ -449,6 +466,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         tool: req.toolName,
         toolUseId: req.toolUseId,
         persist,
+        broadAllow: persist,
         suggestionCount: req.suggestions?.length ?? 0,
       });
       addMessage({
@@ -456,7 +474,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         type: "system",
         content:
           `Allowing ${req.displayName ?? req.toolName} ` +
-          `${persist ? "permanently" : "for this turn"}.`,
+          `${persist ? "for the rest of this session — won't ask again" : "for this turn"}.`,
         timestamp: Date.now(),
       });
 
@@ -593,12 +611,28 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
             void fetchAndShowPorts();
           }
           break;
+        case "logout":
+          // Clear chat state first so the user doesn't see stale messages
+          // flash through behind the ConnectScreen during the auth wipe.
+          setMessages([]);
+          setSessionId("");
+          setPermissionRequest(null);
+          setPlanRequest(null);
+          void connection.disconnect();
+          break;
         case "help":
           // handled inline in ChatInput (inserts a prompt)
           break;
       }
     },
-    [setMessages, setSessionId, onChangeProject, fetchAndShowPorts, tabCtx]
+    [
+      setMessages,
+      setSessionId,
+      onChangeProject,
+      fetchAndShowPorts,
+      tabCtx,
+      connection,
+    ]
   );
 
   return (
@@ -615,11 +649,10 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         </span>
         <span className="chat-panel-actions">
           {isConnected && connection.status === "connected" && (() => {
-            // Show an auth chip with a disconnect button for any signed-in
-            // user — API-key OR Claude.ai subscription. Clicking the chip's
-            // × calls `connection.disconnect()`, which clears localStorage
-            // + backend credentials, flips state back to "idle", and lets
-            // the panel re-render the ConnectScreen automatically.
+            // Informational chip only — shows WHICH auth method is currently
+            // connected (masked API key, or "Claude.ai" for a subscription).
+            // The actual logout action lives behind the `/logout` slash
+            // command in the composer below; no × button on the chip itself.
             //
             // Re-checking status inside the IIFE so TypeScript narrows
             // `connection` to the "connected" variant within this scope —
@@ -635,38 +668,13 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
 
             const label = isApiKey ? apiKeyMasked : "Claude.ai";
             const chipTitle = isApiKey
-              ? "Connected via Anthropic API key"
-              : "Connected via Claude.ai subscription";
-            const disconnectTitle = isApiKey
-              ? "Log out (disconnect API key)"
-              : "Log out (disconnect Claude.ai)";
+              ? "Connected via Anthropic API key — type /logout to sign out"
+              : "Connected via Claude.ai subscription — type /logout to sign out";
 
             return (
               <span className="chat-auth-chip" title={chipTitle}>
                 <span className="chat-auth-chip-dot" aria-hidden />
                 <span className="chat-auth-chip-label">{label}</span>
-                <button
-                  type="button"
-                  className="chat-auth-chip-disconnect"
-                  onClick={() => void connection.disconnect()}
-                  title={disconnectTitle}
-                  aria-label={disconnectTitle}
-                >
-                  <svg
-                    viewBox="0 0 16 16"
-                    width="10"
-                    height="10"
-                    fill="none"
-                    aria-hidden
-                  >
-                    <path
-                      d="M4 4l8 8M12 4l-8 8"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
               </span>
             );
           })()}

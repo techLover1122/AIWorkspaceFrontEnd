@@ -17,9 +17,19 @@ export function PermissionInputPanel({ request, onAllow, onDeny }: PermissionInp
     ref.current?.focus();
   }, []);
 
+  // Surface the tool name in the "always allow" button so the user knows
+  // they're whitelisting the whole tool for the session, not just this one
+  // specific invocation. The behavior backing it lives in chat-panel.tsx's
+  // handlePermissionAllow — it sends a broad `addRules` permission update
+  // with no ruleContent so any future call to this tool is auto-approved.
+  const toolLabel = request.displayName ?? request.toolName;
   const options = [
     { label: "Allow once", key: "1", action: () => onAllow(false) },
-    { label: "Allow permanently", key: "2", action: () => onAllow(true) },
+    {
+      label: `Always allow ${toolLabel} (this session)`,
+      key: "2",
+      action: () => onAllow(true),
+    },
     { label: "Deny", key: "Esc", action: onDeny },
   ];
 
