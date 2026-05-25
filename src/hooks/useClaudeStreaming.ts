@@ -407,5 +407,10 @@ async function processStreamResponse(
     case "aborted":
       callbacks.onFinalize();
       break;
+    case "heartbeat":
+      // Backend keep-alive tick — no UI effect. Its only job is to make the
+      // proxy chain see bytes flowing so the stream isn't reaped during a
+      // long permission wait or a slow model response.
+      break;
   }
 }

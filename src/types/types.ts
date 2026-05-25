@@ -36,7 +36,17 @@ export type ChatMessage = {
 };
 
 export type StreamResponse = {
-  type: "claude_json" | "error" | "done" | "aborted" | "permission_request";
+  type:
+    | "claude_json"
+    | "error"
+    | "done"
+    | "aborted"
+    | "permission_request"
+    // Backend emits this every ~15s while the SDK is busy or waiting on a
+    // permission decision. Frontend ignores it; its only purpose is to keep
+    // the HTTP stream's bytes flowing so proxies (Traefik / Cloudflare /
+    // nginx) don't close the connection during long idle stretches.
+    | "heartbeat";
   data?: unknown;
   error?: string;
 };
