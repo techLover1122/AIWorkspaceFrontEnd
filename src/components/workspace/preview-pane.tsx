@@ -122,6 +122,29 @@ export function PreviewPane({
     });
   });
 
+  // Reload the iframe by re-assigning src to itself. Works even when the
+  // iframe is cross-origin (which it always is here — every service runs
+  // on a per-user subdomain different from the parent). contentWindow.
+  // location.reload() would throw a SecurityError in that case.
+  //
+  // IMPORTANT: this hook MUST live above the early-return branches below.
+  // React enforces a stable hook order across renders — if `url` was unset
+  // on the previous render (NewTabPage branch returned early before
+  // useCallback ran) and is set on the next, the hook count jumps and
+  // React throws "change in the order of Hooks called by PreviewPane".
+  const handleReload = useCallback(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    // Bouncing src forces a fresh navigation. `iframe.src = iframe.src`
+    // alone sometimes no-ops in Chromium when the URL is identical, so
+    // null-then-set unambiguously triggers a load.
+    const u = iframe.src;
+    iframe.src = "about:blank";
+    requestAnimationFrame(() => {
+      iframe.src = u;
+    });
+  }, []);
+
   if (!url) {
     return (
       <div className="preview-frame" style={hiddenStyle}>
@@ -145,23 +168,6 @@ export function PreviewPane({
       </div>
     );
   }
-
-  // Reload the iframe by re-assigning src to itself. Works even when the
-  // iframe is cross-origin (which it always is here — every service runs
-  // on a per-user subdomain different from the parent). contentWindow.
-  // location.reload() would throw a SecurityError in that case.
-  const handleReload = useCallback(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-    // Bouncing src forces a fresh navigation. `iframe.src = iframe.src`
-    // alone sometimes no-ops in Chromium when the URL is identical, so
-    // null-then-set unambiguously triggers a load.
-    const u = iframe.src;
-    iframe.src = "about:blank";
-    requestAnimationFrame(() => {
-      iframe.src = u;
-    });
-  }, []);
 
   // Layered above the iframe (low → high z-index):
   //   1. <iframe> — the live preview (or hidden behind snapshot)
