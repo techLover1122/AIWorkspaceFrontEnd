@@ -31,6 +31,7 @@ const CHAT_WIDTH_KEY = "ai-ide:chat-panel-width";
 const DEFAULT_CHAT_WIDTH = 380;
 const MIN_CHAT_WIDTH = 280;
 const MAX_CHAT_WIDTH_RATIO = 0.7;
+const TOOLBAR_VISIBLE_KEY = "ai-ide:overlay-toolbar-visible";
 
 // Monotonic counter so tab IDs stay unique even when several are created
 // inside the same millisecond — e.g. the openedUrls restore loop on mount,
@@ -69,6 +70,17 @@ export function WorkspaceShell({
   );
   const [activeTabId, setActiveTabId] = useState("vscode-1");
 
+  // Mirror of `tabs` that's always up-to-date inside async handlers and
+  // closures. State updaters run *later* than the surrounding code, so
+  // logic like "does a tab with this URL already exist?" can't read from
+  // the captured `tabs` variable (stale) and can't reliably set local
+  // mutable state from inside an updater (the updater runs after the
+  // surrounding setActiveTabId call). The ref dodges both pitfalls.
+  const tabsRef = useRef<EditorTab[]>(tabs);
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+
   // Keep the VS Code tab in sync when the working directory changes.
   useEffect(() => {
     const url = buildCodeServerUrl(codeServerUrl, workingDirectory);
@@ -79,6 +91,10 @@ export function WorkspaceShell({
   const [groups, setGroups] = useState<Record<string, TabGroup>>({});
   const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
+  // Whether the floating overlay toolbar (refresh / marker / comments)
+  // shows as the full strip or collapses down to a small chevron handle.
+  // Persisted to localStorage so the user's choice survives reloads.
+  const [toolbarVisible, setToolbarVisible] = useState(true);
   // Active overlay tool — applied to the active preview pane to switch the
   // user's cursor (marker / arrow) over the iframe. `null` means no tool is
   // selected and the iframe behaves normally.
@@ -349,6 +365,22 @@ export function WorkspaceShell({
     window.localStorage.setItem(CHAT_WIDTH_KEY, String(Math.round(chatWidth)));
   }, [chatWidth, isResizing]);
 
+  // Hydrate the toolbar-visible flag from localStorage on mount. "0" = hidden,
+  // anything else (including missing) = visible. Stored as "0"/"1" so the
+  // check stays cheap.
+  useEffect(() => {
+    const stored = window.localStorage.getItem(TOOLBAR_VISIBLE_KEY);
+    if (stored === "0") setToolbarVisible(false);
+  }, []);
+
+  const toggleToolbarVisible = useCallback(() => {
+    setToolbarVisible((v) => {
+      const next = !v;
+      window.localStorage.setItem(TOOLBAR_VISIBLE_KEY, next ? "1" : "0");
+      return next;
+    });
+  }, []);
+
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
 
   const moveItem = <T,>(items: T[], fromIndex: number, toIndex: number) => {
@@ -365,17 +397,24 @@ export function WorkspaceShell({
     setTabs((currentTabs) => moveItem(currentTabs, sourceIndex, targetIndex));
   };
 
-  // "+" button → open a blank new tab showing the new tab page
+  // "+" button → open a blank new tab showing the new tab page.
+  //
+  // The id is generated OUTSIDE the setTabs updater on purpose. Two reasons:
+  //   1. nextTabId() mutates a module-level counter — that's an impure side
+  //      effect, so it can't live inside a state updater (React strict-mode
+  //      runs updaters twice in dev, which would burn two ids per click and
+  //      historically caused activeTabId to point at an id that didn't exist
+  //      in the committed tabs array — the symptom was "+ doesn't open a new
+  //      tab, it just keeps showing VS Code".)
+  //   2. We need the same id for both setTabs and setActiveTabId so the new
+  //      tab is actually selected the moment it's added.
   const handleAddTab = () => {
-    setTabs((currentTabs) => {
-      const nextTab: EditorTab = {
-        id: nextTabId(),
-        label: "New Tab",
-        url: "",
-      };
-      setActiveTabId(nextTab.id);
-      return [...currentTabs, nextTab];
-    });
+    const id = nextTabId();
+    setTabs((currentTabs) => [
+      ...currentTabs,
+      { id, label: "New Tab", url: "" },
+    ]);
+    setActiveTabId(id);
   };
 
   // Ensure a URL exists in the SQLite `urls` bookmarks table (idempotent, fire-and-forget).
@@ -437,16 +476,28 @@ export function WorkspaceShell({
       ensureBookmark(url, label);
       markUrlOpened(url, true);
 
+      // Look up an existing tab via the ref (always current), not via the
+      // setTabs updater — the updater runs *after* the surrounding code, so
+      // a value set inside it isn't yet readable by the setActiveTabId
+      // call that follows.
+      const existing = tabsRef.current.find((t) => t.url === url);
+      if (existing) {
+        setActiveTabId(existing.id);
+        return;
+      }
+
+      const newId = nextTabId();
       setTabs((currentTabs) => {
-        const existing = currentTabs.find((t) => t.url === url);
-        if (existing) {
-          setActiveTabId(existing.id);
-          return currentTabs;
-        }
-        const nextTab: EditorTab = { id: nextTabId(), label, url };
-        setActiveTabId(nextTab.id);
-        return [...currentTabs, nextTab];
+        // Re-check under the latest committed state in case two open-tab
+        // calls raced between the ref read above and this updater. Returns
+        // currentTabs unchanged on a collision; setActiveTabId below still
+        // points at `newId`, but the cleanup is bounded — at worst the
+        // user lands on the duplicate's id which doesn't exist, and
+        // activeTab.find falls back to tabs[0]. Rare in practice.
+        if (currentTabs.some((t) => t.url === url)) return currentTabs;
+        return [...currentTabs, { id: newId, label, url }];
       });
+      setActiveTabId(newId);
     })();
   }, [workingDirectory, markUrlOpened, ensureBookmark]);
 
@@ -672,6 +723,8 @@ export function WorkspaceShell({
                   a separate "capture" button. */}
             {activeTab.url && !isCapturing && (
               <EditorOverlayToolbar
+                visible={toolbarVisible}
+                onToggleVisible={toggleToolbarVisible}
                 activeTool={activeTool}
                 onChangeTool={handleChangeTool}
                 onReload={handleActiveTabReload}

@@ -198,8 +198,11 @@ button {
 }
 
 .editor-overlay-toolbar.collapsed {
-  max-width: 36px;
-  padding: 3px;
+  /* 32 px handle + 2 × 4 px padding = 40 px. With box-sizing: border-box,
+     a smaller max-width clips the button's right edge — keep these in sync
+     when adjusting the handle size. */
+  max-width: 40px;
+  padding: 4px;
   border-radius: 999px 0 0 999px;
 }
 

@@ -3,6 +3,14 @@
 export type EditorOverlayTool = "pointer" | "comments";
 
 type EditorOverlayToolbarProps = {
+  /** When true the full strip renders; when false only the small
+   *  chevron handle shows in the same anchor position, clickable to
+   *  expand the strip back. Controlled by the parent so the choice
+   *  persists across remounts (localStorage in workspace-shell). */
+  visible: boolean;
+  /** Flip `visible`. Bound to both the hide chevron (in the full
+   *  toolbar) and the small handle (in the collapsed state). */
+  onToggleVisible: () => void;
   /** Currently active tool (if any). `null` means no tool is selected —
    *  cursor is left untouched so the user can interact with the iframe. */
   activeTool: EditorOverlayTool | null;
@@ -35,25 +43,28 @@ type EditorOverlayToolbarProps = {
 };
 
 /**
- * Floating toolbar that sits under the editor tabs. Layout (always
- * rendered when `activeTab.url` exists):
+ * Floating toolbar that sits under the editor tabs. Two render modes:
  *
- *   [🔄 refresh]   [✏️ marker]   [💬 comments]   [↗ discard]   [Send]
- *                    ↑              ↑              ↑           ↑
- *                    only when      only when      only when   only when
- *                    showAnnotation showAnnotation hasSnapshot hasSnapshot
+ *   visible=true → full strip:
+ *     [🔄 refresh]  [✏️ marker]  [💬 comments]  [↗ discard]  [Send]  [⟩ hide]
+ *                     ↑              ↑              ↑          ↑
+ *                     only when      only when      only when  only when
+ *                     showAnnotation showAnnotation hasSnapshot hasSnapshot
  *
- * The refresh button is always reachable. Marker / comments are
- * controlled by `showAnnotationTools` (per-tab decision in the parent).
- * The discard arrow + Send button only appear once a snapshot has been
- * captured (i.e. once the user has armed marker / comments at least
- * once for this tab).
+ *   visible=false → just the chevron handle (small pill flush against the
+ *     chat panel edge) — clicking it expands the strip back. We keep the
+ *     handle in the same anchor position so the user can find it after
+ *     hiding the toolbar (the previous "removed entirely" version made
+ *     the marker / comments tools unreachable).
  *
- * The collapsed-with-chevron state from the previous version was
- * removed — it confused users who couldn't find the marker tool
- * because it was hidden behind a chevron handle.
+ * The refresh button is always reachable in the full strip. Marker /
+ * comments are controlled by `showAnnotationTools` (per-tab decision in
+ * the parent). The discard arrow + Send button only appear once a
+ * snapshot has been captured.
  */
 export function EditorOverlayToolbar({
+  visible,
+  onToggleVisible,
   activeTool,
   onChangeTool,
   onReload,
@@ -63,6 +74,27 @@ export function EditorOverlayToolbar({
   hasSnapshot,
   className,
 }: EditorOverlayToolbarProps) {
+  // Collapsed mode — just the handle. The `.collapsed` modifier + the
+  // matching CSS in globals.css squash the container down to a 40 px
+  // pill so it reads as a tab attached to the chat panel.
+  if (!visible) {
+    return (
+      <div
+        className={`editor-overlay-toolbar collapsed${className ? ` ${className}` : ""}`}
+      >
+        <button
+          type="button"
+          className="overlay-toolbar-handle"
+          onClick={onToggleVisible}
+          title="Show toolbar"
+          aria-label="Show toolbar"
+        >
+          <IconChevronLeft />
+        </button>
+      </div>
+    );
+  }
+
   // Click the active tool again to deselect it — gives the user a way to
   // restore normal iframe interaction without leaving the toolbar.
   const toggleTool = (tool: EditorOverlayTool) => {
@@ -141,6 +173,21 @@ export function EditorOverlayToolbar({
           )}
         </>
       )}
+
+      {/* Hide the toolbar — separate from the snapshot "discard" chevron
+          (which only appears with hasSnapshot). This one is always
+          available on the far right so the user can collapse the strip
+          when it's in the way of the iframe content. */}
+      <div className="overlay-toolbar-divider" aria-hidden />
+      <button
+        type="button"
+        className="overlay-toolbar-btn"
+        onClick={onToggleVisible}
+        title="Hide toolbar"
+        aria-label="Hide toolbar"
+      >
+        <IconChevronRight />
+      </button>
     </div>
   );
 }
@@ -168,6 +215,20 @@ function IconChevronRight() {
     <svg viewBox="0 0 16 16" fill="none" aria-hidden>
       <path
         d="M6 3l5 5-5 5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconChevronLeft() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M10 3L5 8l5 5"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
