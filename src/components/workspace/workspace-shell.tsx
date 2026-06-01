@@ -135,6 +135,22 @@ export function WorkspaceShell({
     []
   );
 
+  // Reload the currently-active tab's iframe. Wired to the overlay
+  // toolbar's refresh button so it works for any URL — code-server,
+  // dev-server preview, external sites. Same "bounce src through
+  // about:blank" trick the old floating button used: cross-origin
+  // iframes can't be reloaded via contentWindow.location.reload()
+  // without a SecurityError, but reassigning src works universally.
+  const handleActiveTabReload = useCallback(() => {
+    const iframe = iframeRefs.current[activeTabId];
+    if (!iframe) return;
+    const src = iframe.src;
+    iframe.src = "about:blank";
+    requestAnimationFrame(() => {
+      iframe.src = src;
+    });
+  }, [activeTabId]);
+
   const addDrawing = useCallback((targetTabId: string, points: DrawingPoint[]) => {
     setDrawingsByTab((prev) => ({
       ...prev,
@@ -629,11 +645,21 @@ export function WorkspaceShell({
               onGroupToggle={handleGroupToggle}
               onGroupRename={handleGroupRename}
               />
-            {hasPort(activeTab.url) && !isCapturing && (
+            {/* Toolbar visibility rules:
+                - Any tab with a URL → render the toolbar (so the refresh
+                  button is reachable for code-server, dev-previews, etc.)
+                - Annotation tools (marker / comments / send) only appear
+                  for port-bearing previews where drawing on a web app
+                  makes sense — controlled via showAnnotationTools.
+                - Hidden entirely during screenshot capture so the
+                  toolbar itself doesn't end up in the captured PNG. */}
+            {activeTab.url && !isCapturing && (
               <EditorOverlayToolbar
                 expanded={!!snapshotByTab[activeTab.id]}
                 activeTool={activeTool}
                 onChangeTool={setActiveTool}
+                onReload={handleActiveTabReload}
+                showAnnotationTools={hasPort(activeTab.url)}
                 onExpand={handleToolbarExpand}
                 onCollapse={handleToolbarCollapse}
                 onSend={handleToolbarSend}
