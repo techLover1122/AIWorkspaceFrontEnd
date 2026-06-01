@@ -21,20 +21,6 @@ import {
   compositeSnapshotWithSvg,
 } from "../../utils/captureIframeSnapshot";
 
-/** True when the URL looks like a live preview target — anything with an
- *  explicit port (localhost:3000, 127.0.0.1:8080, example.com:5173, …).
- *  The overlay toolbar only makes sense when there's a real web app to
- *  interact with, not on blank tabs or the VS Code iframe. */
-function hasPort(url: string | undefined): boolean {
-  if (!url) return false;
-  try {
-    const u = new URL(url);
-    return u.port !== "";
-  } catch {
-    return false;
-  }
-}
-
 type WorkspaceShellProps = {
   codeServerUrl: string;
   workingDirectory?: string;
@@ -223,12 +209,41 @@ export function WorkspaceShell({
       setSnapshotByTab((prev) => ({ ...prev, [targetId]: dataUrl }));
       setActiveTool("pointer");
     } catch {
-      // User cancelled the picker, or capture failed — toolbar stays
-      // collapsed because `expanded` is tied to snapshot presence.
+      // User cancelled the picker, or capture failed — leave activeTool
+      // null so the toolbar buttons un-press themselves.
+      setActiveTool(null);
     } finally {
       setIsCapturing(false);
     }
   }, [activeTabId]);
+
+  // Marker / comments need a frozen snapshot to draw on. The toolbar
+  // calls onChangeTool directly with the requested tool; we wrap it so
+  // that if no snapshot exists yet for this tab, we capture one first
+  // and then arm the requested tool. Toggling off (tool === null) or
+  // switching between tools when a snapshot already exists is a plain
+  // setActiveTool call — no capture needed.
+  const handleChangeTool = useCallback(
+    (tool: EditorOverlayTool | null) => {
+      const targetId = activeTabId;
+      if (tool === null) {
+        setActiveTool(null);
+        return;
+      }
+      if (snapshotByTab[targetId]) {
+        // Already have a snapshot — just swap the active tool.
+        setActiveTool(tool);
+        return;
+      }
+      // No snapshot yet — capture, then activeTool defaults to "pointer".
+      // If the user clicked "comments" first, switch to it after capture.
+      void (async () => {
+        await handleToolbarExpand();
+        if (tool !== "pointer") setActiveTool(tool);
+      })();
+    },
+    [activeTabId, snapshotByTab, handleToolbarExpand]
+  );
 
   const handleToolbarCollapse = useCallback(() => {
     const targetId = activeTabId;
@@ -646,21 +661,21 @@ export function WorkspaceShell({
               onGroupRename={handleGroupRename}
               />
             {/* Toolbar visibility rules:
-                - Any tab with a URL → render the toolbar (so the refresh
-                  button is reachable for code-server, dev-previews, etc.)
-                - Annotation tools (marker / comments / send) only appear
-                  for port-bearing previews where drawing on a web app
-                  makes sense — controlled via showAnnotationTools.
+                - Any tab with a URL → render the toolbar (so refresh,
+                  marker, and comments are reachable for code-server,
+                  dev-previews, external sites — anything iframe-based).
+                - The blank "new tab" page (no URL) gets no toolbar.
                 - Hidden entirely during screenshot capture so the
-                  toolbar itself doesn't end up in the captured PNG. */}
+                  toolbar itself doesn't end up in the captured PNG.
+                - handleChangeTool auto-captures a snapshot when marker
+                  / comments is first armed, so users don't need to find
+                  a separate "capture" button. */}
             {activeTab.url && !isCapturing && (
               <EditorOverlayToolbar
-                expanded={!!snapshotByTab[activeTab.id]}
                 activeTool={activeTool}
-                onChangeTool={setActiveTool}
+                onChangeTool={handleChangeTool}
                 onReload={handleActiveTabReload}
-                showAnnotationTools={hasPort(activeTab.url)}
-                onExpand={handleToolbarExpand}
+                showAnnotationTools={!!activeTab.url}
                 onCollapse={handleToolbarCollapse}
                 onSend={handleToolbarSend}
                 hasSnapshot={!!snapshotByTab[activeTab.id]}

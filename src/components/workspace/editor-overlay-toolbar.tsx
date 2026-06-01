@@ -3,61 +3,61 @@
 export type EditorOverlayTool = "pointer" | "comments";
 
 type EditorOverlayToolbarProps = {
-  /** Whether the toolbar is showing its full toolset (true) or just the
-   *  collapsed handle (false). Controlled by the parent so the open/close
-   *  state survives any mid-flow re-mounts (e.g. during the screen-grab
-   *  hand-off when this component briefly unmounts). Only matters when
-   *  annotation tools are visible — the refresh button stays put either
-   *  way. */
-  expanded: boolean;
   /** Currently active tool (if any). `null` means no tool is selected —
    *  cursor is left untouched so the user can interact with the iframe. */
   activeTool: EditorOverlayTool | null;
+  /** Called when the user clicks a tool button (marker / comments). The
+   *  parent should ALSO auto-capture an iframe snapshot if one doesn't
+   *  already exist for this tab — the marker / comments tools draw on a
+   *  frozen snapshot, not on the live iframe. */
   onChangeTool: (tool: EditorOverlayTool | null) => void;
   /** Reload the active tab's iframe. Always shown — works for any URL
    *  (code-server, live preview, external sites). */
   onReload: () => void;
   /** When false, hide marker / comments / send buttons. The refresh
-   *  button still renders. Set to true only when the active tab is a
-   *  port-bearing preview where annotation actually makes sense. */
+   *  button still renders. Set to true on tabs where annotation makes
+   *  sense (port-bearing previews; in practice we now also show on
+   *  code-server / external sites since the snapshot path works there
+   *  too — the only excluded tab type is the blank "new tab" page,
+   *  which never has a URL). */
   showAnnotationTools?: boolean;
-  /** Fires when the user clicks the collapsed handle. Parent should
-   *  capture the iframe snapshot and arm the marker tool. */
-  onExpand?: () => void;
-  /** Fires when the user clicks the collapse arrow in the expanded
-   *  toolbar. Parent should discard the snapshot. */
+  /** Fires when the user clicks the "discard annotation" arrow. Parent
+   *  should discard the captured snapshot + any drawings / comments
+   *  attached to it. Only meaningful when `hasSnapshot` is true. */
   onCollapse?: () => void;
-  /** Fires when the user clicks the Send button — parent should composite
-   *  the snapshot + drawings and push them into chat as an attachment. */
+  /** Fires when the user clicks the Send button — parent should
+   *  composite the snapshot + drawings and push them into chat. */
   onSend?: () => void;
   /** Whether a snapshot is currently captured for this tab — controls
-   *  whether the Send button is shown / enabled. */
+   *  whether Send + the discard-snapshot arrow are visible. */
   hasSnapshot?: boolean;
   className?: string;
 };
 
 /**
- * Floating toolbar that sits under the editor tabs whenever a tab has a
- * URL loaded. Two layers of buttons:
+ * Floating toolbar that sits under the editor tabs. Layout (always
+ * rendered when `activeTab.url` exists):
  *
- *   1. Refresh — always visible. Reloads the active iframe in place
- *      (works for code-server, dev-server previews, external sites,
- *      anything). Lives at the leading edge so it's still reachable when
- *      annotation tools are hidden or the bar is collapsed.
+ *   [🔄 refresh]   [✏️ marker]   [💬 comments]   [↗ discard]   [Send]
+ *                    ↑              ↑              ↑           ↑
+ *                    only when      only when      only when   only when
+ *                    showAnnotation showAnnotation hasSnapshot hasSnapshot
  *
- *   2. Marker / Comments / Send — only meaningful for port-bearing
- *      previews (live web app), so they're gated behind
- *      `showAnnotationTools`. Inside that subset, the bar can collapse
- *      down to a chevron handle for users who want maximum unobstructed
- *      view of the preview.
+ * The refresh button is always reachable. Marker / comments are
+ * controlled by `showAnnotationTools` (per-tab decision in the parent).
+ * The discard arrow + Send button only appear once a snapshot has been
+ * captured (i.e. once the user has armed marker / comments at least
+ * once for this tab).
+ *
+ * The collapsed-with-chevron state from the previous version was
+ * removed — it confused users who couldn't find the marker tool
+ * because it was hidden behind a chevron handle.
  */
 export function EditorOverlayToolbar({
-  expanded,
   activeTool,
   onChangeTool,
   onReload,
   showAnnotationTools = false,
-  onExpand,
   onCollapse,
   onSend,
   hasSnapshot,
@@ -69,39 +69,9 @@ export function EditorOverlayToolbar({
     onChangeTool(activeTool === tool ? null : tool);
   };
 
-  // Collapsed view: only meaningful when annotation tools are part of
-  // the picture. When there's nothing to collapse to but the refresh
-  // button, we always render the full bar.
-  if (showAnnotationTools && !expanded) {
-    return (
-      <div className={`editor-overlay-toolbar collapsed${className ? ` ${className}` : ""}`}>
-        <button
-          type="button"
-          className="overlay-toolbar-btn"
-          onClick={onReload}
-          title="Reload this tab"
-          aria-label="Reload this tab"
-        >
-          <IconReload />
-        </button>
-        <button
-          type="button"
-          className="overlay-toolbar-handle"
-          onClick={onExpand}
-          title="Show drawing toolbar"
-          aria-label="Show drawing toolbar"
-          aria-expanded={false}
-        >
-          <IconChevronLeft />
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className={`editor-overlay-toolbar${className ? ` ${className}` : ""}`}>
-      {/* Refresh — always visible. Works for any tab URL: code-server,
-          dev-server previews, external sites, etc. */}
+      {/* Refresh — always visible. Works for any tab URL. */}
       <button
         type="button"
         className="overlay-toolbar-btn"
@@ -112,50 +82,50 @@ export function EditorOverlayToolbar({
         <IconReload />
       </button>
 
-      {/* Annotation tools — gated behind showAnnotationTools so they only
-          appear on port-bearing previews where drawing on a web app
-          actually makes sense. */}
       {showAnnotationTools && (
         <>
           <div className="overlay-toolbar-divider" aria-hidden />
 
-          {/* Collapse arrow — hides the annotation tools (parent swaps in
-              the small "Annotate" pill so the page is unobstructed). */}
-          <button
-            type="button"
-            className="overlay-toolbar-collapse"
-            onClick={onCollapse}
-            title="Hide annotation tools"
-            aria-label="Hide annotation tools"
-          >
-            <IconChevronRight />
-          </button>
-
-          <div className="overlay-toolbar-divider" aria-hidden />
-
+          {/* Marker — clicking this auto-takes a snapshot (via parent's
+              onChangeTool wrapper) if one doesn't exist yet. */}
           <button
             type="button"
             className={`overlay-toolbar-btn${activeTool === "pointer" ? " active" : ""}`}
             onClick={() => toggleTool("pointer")}
-            title="Marker"
+            title="Marker — draw on a snapshot of this tab"
             aria-label="Marker"
             aria-pressed={activeTool === "pointer"}
           >
             <IconPointer />
           </button>
+
+          {/* Comments — same auto-snapshot behavior as marker. */}
           <button
             type="button"
             className={`overlay-toolbar-btn${activeTool === "comments" ? " active" : ""}`}
             onClick={() => toggleTool("comments")}
-            title="Comments"
+            title="Comments — pin notes on a snapshot of this tab"
             aria-label="Comments"
             aria-pressed={activeTool === "comments"}
           >
             <IconComments />
           </button>
 
+          {/* Discard snapshot + Send appear only after a snapshot is
+              captured. Snapshot lifecycle: marker / comments click
+              triggers capture; discard arrow or Send clears it. */}
           {hasSnapshot && (
             <>
+              <div className="overlay-toolbar-divider" aria-hidden />
+              <button
+                type="button"
+                className="overlay-toolbar-collapse"
+                onClick={onCollapse}
+                title="Discard snapshot and annotations"
+                aria-label="Discard snapshot and annotations"
+              >
+                <IconChevronRight />
+              </button>
               <div className="overlay-toolbar-divider" aria-hidden />
               <button
                 type="button"
@@ -184,20 +154,6 @@ function IconReload() {
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
       <path
         d="M3 8a5 5 0 0 1 9-3M13 3v3h-3M13 8a5 5 0 0 1-9 3M3 13v-3h3"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconChevronLeft() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M10 3L5 8l5 5"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
