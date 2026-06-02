@@ -116,6 +116,25 @@ export function WorkspaceShell({
   // Set true around the actual frame grab so the toolbar / overlay UI can
   // hide itself out of the captured pixels.
   const [isCapturing, setIsCapturing] = useState(false);
+  // Per-tab "iframe is fetching" flag. Toggled from PreviewPane's
+  // `onLoadingChange` callback. Drives the tab-strip sweep animation
+  // (.editor-tab.loading) — gated to actual fetches instead of running
+  // forever on the active tab.
+  const [loadingTabIds, setLoadingTabIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const handleTabLoadingChange = useCallback(
+    (tabId: string, loading: boolean) => {
+      setLoadingTabIds((prev) => {
+        if (loading === prev.has(tabId)) return prev;
+        const next = new Set(prev);
+        if (loading) next.add(tabId);
+        else next.delete(tabId);
+        return next;
+      });
+    },
+    []
+  );
   // Imperative handle into ChatInput so we can drop the composited snapshot
   // PNG as an attachment after Send.
   const chatInputRef = useRef<ChatInputHandle>(null);
@@ -147,11 +166,15 @@ export function WorkspaceShell({
     const iframe = iframeRefs.current[activeTabId];
     if (!iframe) return;
     const src = iframe.src;
+    // src is mutated imperatively here (bypassing the `url` prop / useEffect
+    // in PreviewPane), so flag loading manually — the iframe's `onLoad`
+    // will clear it once the reload finishes.
+    handleTabLoadingChange(activeTabId, true);
     iframe.src = "about:blank";
     requestAnimationFrame(() => {
       iframe.src = src;
     });
-  }, [activeTabId]);
+  }, [activeTabId, handleTabLoadingChange]);
 
   const addDrawing = useCallback((targetTabId: string, points: DrawingPoint[]) => {
     setDrawingsByTab((prev) => ({
@@ -576,6 +599,12 @@ export function WorkspaceShell({
         delete next[tabId];
         return next;
       });
+      setLoadingTabIds((prev) => {
+        if (!prev.has(tabId)) return prev;
+        const next = new Set(prev);
+        next.delete(tabId);
+        return next;
+      });
       delete iframeRefs.current[tabId];
       delete drawingSvgRefs.current[tabId];
 
@@ -701,6 +730,7 @@ export function WorkspaceShell({
               tabs={tabs}
               activeTabId={activeTabId}
               groups={groups}
+              loadingTabIds={loadingTabIds}
               onSelectTab={setActiveTabId}
               onCloseTab={handleCloseTab}
               onAddTab={handleAddTab}
@@ -759,6 +789,7 @@ export function WorkspaceShell({
                   onElementsReady={(els) =>
                     registerPreviewElements(tab.id, els)
                   }
+                  onLoadingChange={handleTabLoadingChange}
                   onNavigate={handleTabNavigate}
                 />
               ))}

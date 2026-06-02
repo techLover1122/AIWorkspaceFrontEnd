@@ -105,10 +105,34 @@ export function ChatMessages({
   showToolDetails = false,
 }: ChatMessagesProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lastScrolledUserIdRef = useRef<string | null>(null);
+
+  // Anchor the latest user message to the top of the scroll viewport whenever
+  // the user submits a new message. We deliberately do NOT scroll while the
+  // assistant streams its reply — that lets the user message stay pinned at
+  // the top, matching the Claude.ai / ChatGPT reading pattern instead of the
+  // old "always glued to the bottom" behavior.
+  const latestUserMsgId = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.type === "chat" && m.role === "user") return m.id;
+    }
+    return null;
+  })();
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages]);
+    if (!latestUserMsgId) return;
+    if (lastScrolledUserIdRef.current === latestUserMsgId) return;
+    lastScrolledUserIdRef.current = latestUserMsgId;
+    // Defer to next frame so the new <UserMessage> is mounted before we
+    // try to scroll to it.
+    requestAnimationFrame(() => {
+      const el = document.querySelector(
+        `[data-msg-id="${CSS.escape(latestUserMsgId)}"]`
+      );
+      el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [latestUserMsgId]);
 
   if (messages.length === 0) {
     return (
@@ -160,6 +184,7 @@ function Message({
       if (message.role === "user") {
         return (
           <UserMessage
+            messageId={message.id}
             content={message.content}
             imageUrls={message.imageUrls}
             onReuse={onReuse}
@@ -252,10 +277,12 @@ function Message({
    ============================================================ */
 
 function UserMessage({
+  messageId,
   content,
   imageUrls,
   onReuse,
 }: {
+  messageId: string;
   content: string;
   imageUrls?: string[];
   onReuse?: (text: string) => void;
@@ -276,7 +303,7 @@ function UserMessage({
   const handleReuse = () => onReuse?.(content);
 
   return (
-    <div className="msg-user">
+    <div className="msg-user" data-msg-id={messageId}>
       <div className="msg-user-card">
         <div className="msg-user-meta">
           <span className="msg-user-badge" aria-hidden>

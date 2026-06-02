@@ -702,6 +702,26 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
             type="button"
             className="chat-header-btn"
             onClick={() => {
+              if (state.messages.length === 0) return;
+              const ok = window.confirm(
+                "Delete the current chat history? This can't be undone."
+              );
+              if (!ok) return;
+              setMessages([]);
+              setSessionId("");
+              setPermissionRequest(null);
+              setPlanRequest(null);
+            }}
+            disabled={state.messages.length === 0}
+            title="Clear chat history"
+            aria-label="Clear chat history"
+          >
+            <IconTrash />
+          </button>
+          <button
+            type="button"
+            className="chat-header-btn"
+            onClick={() => {
               setMessages([]);
               setSessionId("");
             }}
@@ -838,6 +858,20 @@ function IconPlus() {
         stroke="currentColor"
         strokeWidth="1.4"
         strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconTrash() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M3 4.5h10M6.5 4.5V3a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1.5M4.5 4.5l.6 8a1.5 1.5 0 0 0 1.5 1.4h2.8a1.5 1.5 0 0 0 1.5-1.4l.6-8M7 7v4M9 7v4"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );

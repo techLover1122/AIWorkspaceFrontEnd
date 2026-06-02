@@ -24,6 +24,9 @@ type EditorTabsProps = {
   tabs: EditorTab[];
   activeTabId: string;
   groups: Record<string, TabGroup>;
+  /** Tab ids whose iframe is currently fetching. Drives the sweep
+   *  animation — see `.editor-tab.loading::before` in globals.css. */
+  loadingTabIds?: ReadonlySet<string>;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onAddTab: () => void;
@@ -39,6 +42,7 @@ export function EditorTabs({
   tabs,
   activeTabId,
   groups,
+  loadingTabIds,
   onSelectTab,
   onCloseTab,
   onAddTab,
@@ -158,7 +162,7 @@ export function EditorTabs({
           role="button"
           tabIndex={0}
           draggable
-          className={`editor-tab${activeTabId === tab.id ? " active" : ""}`}
+          className={`editor-tab${activeTabId === tab.id ? " active" : ""}${loadingTabIds?.has(tab.id) ? " loading" : ""}`}
           style={
             group
               ? ({ "--tab-group-color": group.color } as CSSProperties)

@@ -329,9 +329,26 @@ button {
 .editor-tab.active {
   background: var(--vsc-tab-active);
   color: var(--vsc-text-emphasis);
+  /* 3-side border (top, left, right) — no bottom so the tab visually "opens"
+     into the editor area below. Inset shadows instead of `border` so the
+     tab's intrinsic size doesn't shift on activation. */
+  box-shadow:
+    inset 0 1px 0 var(--vsc-border-strong),
+    inset 1px 0 0 var(--vsc-border-strong),
+    inset -1px 0 0 var(--vsc-border-strong);
 }
 
-.editor-tab.active::before {
+/* Grouped active tab keeps the group color strip on top and adds side borders. */
+.editor-tab[data-group].active {
+  box-shadow:
+    inset 0 2px 0 var(--tab-group-color),
+    inset 1px 0 0 var(--vsc-border-strong),
+    inset -1px 0 0 var(--vsc-border-strong);
+}
+
+/* Loading sweep — only animates while the tab's iframe is fetching. Gated
+   to `.loading` so the active-but-idle tab stays calm. */
+.editor-tab.loading::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -351,7 +368,7 @@ button {
 }
 
 /* First tab in a group — left corner is flat so clip-path matches */
-.editor-tab[data-group-start].active::before {
+.editor-tab[data-group-start].loading::before {
   clip-path: inset(0 0 calc(100% - 2px) 0 round 0 8px 0 0);
 }
 

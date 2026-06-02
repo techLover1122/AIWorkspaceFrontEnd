@@ -51,6 +51,9 @@ type PreviewPaneProps = {
     iframe: HTMLIFrameElement | null;
     svg: SVGSVGElement | null;
   }) => void;
+  /** Fires whenever the iframe starts/stops loading. Drives the tab strip's
+   *  sweep animation — see `.editor-tab.loading` in globals.css. */
+  onLoadingChange?: (tabId: string, loading: boolean) => void;
   onNavigate: (tabId: string, url: string, label: string) => void;
 };
 
@@ -90,11 +93,28 @@ export function PreviewPane({
   onRemoveComment,
   snapshot,
   onElementsReady,
+  onLoadingChange,
   onNavigate,
 }: PreviewPaneProps) {
   const tabCtx = useWorkspaceTab();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const drawingsSvgRef = useRef<SVGSVGElement>(null);
+
+  // Mark the tab as loading the moment its URL changes (the iframe will
+  // refetch) and clear it again on the next `load` event. Empty URL = the
+  // "new tab" page, which doesn't fetch anything, so we never enter the
+  // loading state for it.
+  const onLoadingChangeRef = useRef(onLoadingChange);
+  useEffect(() => {
+    onLoadingChangeRef.current = onLoadingChange;
+  }, [onLoadingChange]);
+  useEffect(() => {
+    if (!url || url === PORTS_VIEW_URL) {
+      onLoadingChangeRef.current?.(tabId, false);
+      return;
+    }
+    onLoadingChangeRef.current?.(tabId, true);
+  }, [tabId, url]);
   // Position of an in-flight comment that hasn't been committed yet — the
   // popover lives at this point until the user types and confirms, or
   // dismisses with Esc / empty submit.
@@ -169,6 +189,7 @@ export function PreviewPane({
           title="Preview"
           loading="lazy"
           ref={iframeRef}
+          onLoad={() => onLoadingChangeRef.current?.(tabId, false)}
           // While a snapshot is being annotated, keep the iframe in the
           // DOM (so unmounting doesn't lose its state) but invisible
           // behind the static image.
