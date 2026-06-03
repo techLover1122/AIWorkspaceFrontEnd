@@ -295,6 +295,7 @@ export function ChatMessages({
           onReuse={onReuse}
           showToolDetails={showToolDetails}
           isLatestTodoWrite={msg.id === latestTodoWriteId}
+          isLatestUserMsg={msg.id === latestUserMsgId}
         />
       ))}
     </div>
@@ -309,6 +310,11 @@ type MessageProps = {
    *  renders as the live plan card; older ones stay hidden unless the
    *  user opts into showToolDetails. */
   isLatestTodoWrite?: boolean;
+  /** True for the most-recent user message. Only this one gets the
+   *  sticky-to-top treatment — older user messages scroll normally so
+   *  multiple sticky elements don't stack on top of each other when
+   *  the user scrolls back through history. */
+  isLatestUserMsg?: boolean;
 };
 
 /**
@@ -329,6 +335,7 @@ function MessageImpl({
   onReuse,
   showToolDetails,
   isLatestTodoWrite,
+  isLatestUserMsg,
 }: MessageProps) {
   // TodoWrite gets its own structured live card so the user can always
   // see "what step the AI is on" — this is the single most-asked-about
@@ -364,6 +371,7 @@ function MessageImpl({
             content={message.content}
             imageUrls={message.imageUrls}
             onReuse={onReuse}
+            isLatest={isLatestUserMsg ?? false}
           />
         );
       }
@@ -457,6 +465,9 @@ type UserMessageProps = {
   content: string;
   imageUrls?: string[];
   onReuse?: (text: string) => void;
+  /** Most-recent user msg gets the sticky-to-top class. Older user
+   *  msgs scroll normally to avoid the stack-on-top overlap. */
+  isLatest: boolean;
 };
 
 const UserMessage = memo(UserMessageImpl);
@@ -466,6 +477,7 @@ function UserMessageImpl({
   content,
   imageUrls,
   onReuse,
+  isLatest,
 }: UserMessageProps) {
   const [copied, setCopied] = useState(false);
   const [zoomedUrl, setZoomedUrl] = useState<string | null>(null);
@@ -483,7 +495,10 @@ function UserMessageImpl({
   const handleReuse = () => onReuse?.(content);
 
   return (
-    <div className="msg-user" data-msg-id={messageId}>
+    <div
+      className={`msg-user${isLatest ? " msg-user-latest" : ""}`}
+      data-msg-id={messageId}
+    >
       <div className="msg-user-card">
         <div className="msg-user-meta">
           <span className="msg-user-badge" aria-hidden>

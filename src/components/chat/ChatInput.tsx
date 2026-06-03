@@ -5,6 +5,7 @@ import {
   KeyboardEvent,
   ClipboardEvent,
   forwardRef,
+  memo,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -131,7 +132,7 @@ async function fileToAttachment(file: File): Promise<Attachment> {
    ChatInput
    ============================================================ */
 
-export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(
+const ChatInputImpl = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(
   {
     onSend,
     onStop,
@@ -491,6 +492,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     </div>
   );
 });
+
+/**
+ * Wrap ChatInput in React.memo so stream chunks bouncing through the
+ * parent ChatPanel don't re-render the composer 60 times per second
+ * during a long reply. Without this, the textarea repaints on every
+ * rAF flush from streaming text — which is what made typing feel
+ * sticky once a reply got going. Shallow comparison is enough because
+ * ChatPanel routes its callbacks through useCallback already.
+ */
+export const ChatInput = memo(ChatInputImpl);
 
 /* ============================================================
    Attachment pill

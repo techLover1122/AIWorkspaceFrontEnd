@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { MiniBot } from "./MiniBot";
 import type { ChatMessage } from "../../types/types";
 
@@ -66,40 +67,94 @@ export function AnimatedAIBot() {
 
 /* ------------------------------------------------------------------
    Inline typing indicator — shown while the SDK turn is in flight.
-   The label is *derived from real activity* by walking the message
-   list backward and matching the most recent tool call / streaming
-   text — not a hardcoded cycle. That way the user sees what Claude
-   is actually doing right now ("Reading config.json", "Running
-   bash", "Editing layout.tsx", …) the way Claude.ai does. The
-   shimmer animation in globals.css paints the text regardless of
-   what string we pass in.
+   Rules (from user feedback):
+     - Show ONE word only. No filenames, no command names, no phrases.
+     - The single word reflects what Claude is doing right now —
+       Thinking / Reading / Writing / Editing / Coding / Searching /
+       Running / Fetching / Working / Updating / Loading.
+     - While the indicator is visible, the word cycles through four
+       languages: English → Spanish → Greek → Latin → English …,
+       changing every ~1.6s. Gives the indicator a "alive, multilingual"
+       feel without flashing different *activities*.
    ------------------------------------------------------------------ */
+
+type StatusKey =
+  | "Thinking"
+  | "Reading"
+  | "Writing"
+  | "Editing"
+  | "Coding"
+  | "Searching"
+  | "Running"
+  | "Fetching"
+  | "Working"
+  | "Updating"
+  | "Loading";
+
+const LANGUAGES = ["en", "es", "el", "la"] as const;
+type Lang = (typeof LANGUAGES)[number];
+
+/** Translations of each status key into the four cycling languages.
+ *  English → Spanish → Greek → Latin. The latin entries use the
+ *  present-active participle form ("thinking" → "cogitans") which
+ *  reads as the verb's "doing" form, matching the others. */
+const TRANSLATIONS: Record<StatusKey, Record<Lang, string>> = {
+  Thinking:  { en: "Thinking",  es: "Pensando",     el: "Σκέπτομαι",    la: "Cogitans" },
+  Reading:   { en: "Reading",   es: "Leyendo",      el: "Διαβάζω",      la: "Legens" },
+  Writing:   { en: "Writing",   es: "Escribiendo",  el: "Γράφω",        la: "Scribens" },
+  Editing:   { en: "Editing",   es: "Editando",     el: "Επεξεργάζομαι", la: "Emendans" },
+  Coding:    { en: "Coding",    es: "Codificando",  el: "Κωδικοποιώ",   la: "Codicans" },
+  Searching: { en: "Searching", es: "Buscando",     el: "Ψάχνω",        la: "Quaerens" },
+  Running:   { en: "Running",   es: "Ejecutando",   el: "Εκτελώ",       la: "Currens" },
+  Fetching:  { en: "Fetching",  es: "Obteniendo",   el: "Αναζητώ",      la: "Captans" },
+  Working:   { en: "Working",   es: "Trabajando",   el: "Εργάζομαι",    la: "Operans" },
+  Updating:  { en: "Updating",  es: "Actualizando", el: "Ενημερώνω",    la: "Renovans" },
+  Loading:   { en: "Loading",   es: "Cargando",     el: "Φορτώνω",      la: "Onerans" },
+};
+
+const LANG_CYCLE_MS = 1_600;
 
 export function TypingIndicator({ messages }: { messages: ChatMessage[] }) {
   const status = deriveStatus(messages);
+  // Local language index — advances on a timer while the indicator is
+  // mounted. Mounting/unmounting takes care of starting/stopping the
+  // cycle, since the indicator is only rendered while isLoading is on.
+  const [langIdx, setLangIdx] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setLangIdx((i) => (i + 1) % LANGUAGES.length);
+    }, LANG_CYCLE_MS);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const lang = LANGUAGES[langIdx];
+  const word = TRANSLATIONS[status][lang];
   return (
     <span className="typing-indicator" aria-live="polite">
       <MiniBot />
-      <span className="typing-indicator-text">{status}</span>
+      <span className="typing-indicator-text" lang={lang}>
+        {word}
+      </span>
     </span>
   );
 }
 
 /* ------------------------------------------------------------------
-   Status derivation
+   Status derivation — single word only
    ------------------------------------------------------------------ */
 
-/** Walk the message list back-to-front and return a short status label
- *  for whatever the assistant is doing right now. User / system / error
- *  messages are skipped — they don't describe AI activity. */
-function deriveStatus(messages: ChatMessage[]): string {
+/** Walk the message list back-to-front and return ONE status key for
+ *  whatever the assistant is doing right now. Phrases, filenames,
+ *  command names are intentionally NOT surfaced — the user explicitly
+ *  asked for single-word labels. */
+function deriveStatus(messages: ChatMessage[]): StatusKey {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.type === "thinking" && m.isStreaming) {
       return "Thinking";
     }
     if (m.type === "tool") {
-      return describeTool(m.toolName ?? "", m.toolInput);
+      return toolToStatus(m.toolName ?? "");
     }
     if (m.type === "tool_result") {
       // Tool just finished — Claude is now reading the result and
@@ -108,6 +163,8 @@ function deriveStatus(messages: ChatMessage[]): string {
     }
     if (m.type === "chat" && m.role === "assistant") {
       if (m.isStreaming) {
+        // Once text has started, the model is composing prose — call
+        // it Writing. Empty stream is still pre-text Thinking.
         return m.content.trim() ? "Writing" : "Thinking";
       }
       // Last assistant turn already finalized but a new turn is in
@@ -119,83 +176,40 @@ function deriveStatus(messages: ChatMessage[]): string {
   return "Thinking";
 }
 
-/** Map a tool name + its raw input to a short verb-phrase. Tries to
- *  surface the most useful identifier (filename, command name, search
- *  pattern) so the user sees specific activity, not "Using Edit". */
-function describeTool(
-  toolName: string,
-  input?: Record<string, unknown>
-): string {
-  const getStr = (key: string): string | null => {
-    const v = input?.[key];
-    return typeof v === "string" && v.length > 0 ? v : null;
-  };
-  const basename = (p: string | null): string | null => {
-    if (!p) return null;
-    const match = p.match(/[^/\\]+$/);
-    return match ? match[0] : p;
-  };
-
+/** Single-word verb for each tool. Bash / shell commands collapse to
+ *  "Coding" (rather than "Running") to give a coder-friendly feel
+ *  during file-edit-heavy turns; pure command tools that aren't
+ *  obviously about code (WebFetch, WebSearch) get more specific verbs. */
+function toolToStatus(toolName: string): StatusKey {
   switch (toolName) {
-    case "Read": {
-      const name = basename(getStr("file_path") ?? getStr("path"));
-      return name ? `Reading ${name}` : "Reading file";
-    }
+    case "Read":
+      return "Reading";
     case "Edit":
-    case "MultiEdit": {
-      const name = basename(getStr("file_path"));
-      return name ? `Editing ${name}` : "Editing file";
-    }
-    case "Write": {
-      const name = basename(getStr("file_path"));
-      return name ? `Writing ${name}` : "Writing file";
-    }
+    case "MultiEdit":
     case "NotebookEdit":
-      return "Editing notebook";
+      return "Editing";
+    case "Write":
+      return "Writing";
     case "Bash":
-    case "PowerShell": {
-      const cmd = getStr("command");
-      if (cmd) {
-        const first = cmd.trim().split(/\s+/)[0] ?? "";
-        if (first) return `Running ${first}`;
-      }
-      return "Running command";
-    }
-    case "Glob": {
-      const pattern = getStr("pattern");
-      return pattern ? `Globbing ${pattern}` : "Searching files";
-    }
-    case "Grep": {
-      const pattern = getStr("pattern");
-      if (pattern) {
-        const short = pattern.length > 24 ? `${pattern.slice(0, 24)}…` : pattern;
-        return `Searching "${short}"`;
-      }
-      return "Searching code";
-    }
-    case "WebSearch": {
-      const query = getStr("query");
-      return query ? `Searching the web` : "Searching the web";
-    }
+    case "PowerShell":
+      return "Coding";
+    case "Glob":
+    case "Grep":
+      return "Searching";
+    case "WebSearch":
+      return "Searching";
     case "WebFetch":
-      return "Fetching URL";
+      return "Fetching";
     case "TodoWrite":
-      return "Updating todos";
+      return "Updating";
     case "Task":
     case "Agent":
-      return "Running agent";
+      return "Running";
     case "ToolSearch":
-      return "Loading tools";
+      return "Loading";
     case "AskUserQuestion":
-      return "Preparing a question";
+      return "Thinking";
     default:
-      // MCP tools come through as `mcp__<server>__<tool>` — pretty-print
-      // those instead of dumping the raw id.
-      if (toolName.startsWith("mcp__")) {
-        const parts = toolName.split("__");
-        const last = parts[parts.length - 1] || toolName;
-        return `Using ${last}`;
-      }
-      return toolName ? `Using ${toolName}` : "Working";
+      return "Working";
   }
 }

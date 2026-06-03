@@ -13,6 +13,14 @@ import { terminalWsUrl } from "../../constant/api";
  * and bridges stdio over WebSocket. Theme is tuned to match the chat
  * panel's accent palette (blue cursor / selection, green success-y
  * tones) so it sits in the same visual family as the rest of the IDE.
+ *
+ * Auto-reconnect: WebSocket drops are normal — Traefik / nginx /
+ * Cloudflare all close idle connections eventually, even with our
+ * server-side ping (laptop sleep, brief network glitches, container
+ * restarts). On `close` we re-dial with exponential backoff up to
+ * 5 attempts. The xterm instance is preserved across reconnects, so
+ * scrollback survives; the underlying PTY is a fresh shell each time
+ * (we don't have session-resume on the backend yet).
  */
 export function TerminalView() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -77,55 +85,109 @@ export function TerminalView() {
       // will retry once layout settles.
     }
 
-    const ws = new WebSocket(terminalWsUrl());
+    // Reconnect bookkeeping — kept inside the effect so each mount has
+    // its own counters; on unmount they're discarded with the closure.
+    let cancelled = false;
+    let reconnectAttempt = 0;
+    const MAX_RECONNECT_ATTEMPTS = 5;
+    let currentWs: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    ws.addEventListener("open", () => {
-      ws.send(
-        JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows })
-      );
-    });
-
-    ws.addEventListener("message", (e) => {
-      try {
-        const msg = JSON.parse(e.data) as {
-          type?: string;
-          data?: string;
-          code?: number | null;
-        };
-        if (msg.type === "data" && typeof msg.data === "string") {
-          term.write(msg.data);
-        } else if (msg.type === "exit") {
-          term.write(
-            `\r\n\x1b[2m[process exited with code ${msg.code ?? 0}]\x1b[0m\r\n`
-          );
-        } else if (msg.type === "error" && typeof msg.data === "string") {
-          term.write(`\x1b[31m${msg.data}\x1b[0m`);
+    const sendIfOpen = (payload: unknown): void => {
+      if (currentWs?.readyState === WebSocket.OPEN) {
+        try {
+          currentWs.send(JSON.stringify(payload));
+        } catch {
+          // dropped between check and send — the close handler will retry
         }
-      } catch {
-        // Non-JSON frame — ignore (shouldn't happen with our backend).
       }
-    });
+    };
 
-    ws.addEventListener("close", () => {
-      term.write("\r\n\x1b[2m[connection closed]\x1b[0m\r\n");
-    });
+    const connect = (): void => {
+      if (cancelled) return;
 
-    ws.addEventListener("error", () => {
-      term.write(
-        "\r\n\x1b[31m[connection error — backend may be offline]\x1b[0m\r\n"
-      );
-    });
+      const ws = new WebSocket(terminalWsUrl());
+      currentWs = ws;
+
+      ws.addEventListener("open", () => {
+        if (cancelled) {
+          try {
+            ws.close();
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        reconnectAttempt = 0;
+        if (reconnectAttempt > 0) {
+          // After a successful reconnect, write a thin separator so the
+          // user can see where the new shell session started.
+          term.write("\r\n\x1b[2m── reconnected ──\x1b[0m\r\n");
+        }
+        // Tell the new PTY about the current viewport size.
+        ws.send(
+          JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows })
+        );
+      });
+
+      ws.addEventListener("message", (e) => {
+        try {
+          const msg = JSON.parse(e.data) as {
+            type?: string;
+            data?: string;
+            code?: number | null;
+          };
+          if (msg.type === "data" && typeof msg.data === "string") {
+            term.write(msg.data);
+          } else if (msg.type === "exit") {
+            term.write(
+              `\r\n\x1b[2m[process exited with code ${msg.code ?? 0}]\x1b[0m\r\n`
+            );
+          } else if (msg.type === "error" && typeof msg.data === "string") {
+            term.write(`\x1b[31m${msg.data}\x1b[0m`);
+          }
+        } catch {
+          // Non-JSON frame — ignore (shouldn't happen with our backend).
+        }
+      });
+
+      ws.addEventListener("close", () => {
+        if (cancelled) return;
+        if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+          term.write(
+            "\r\n\x1b[31m[connection lost — max reconnect attempts reached. " +
+              "Refresh the tab to try again.]\x1b[0m\r\n"
+          );
+          return;
+        }
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s. Gives transient
+        // proxy/network blips room to settle without spamming the
+        // backend with reconnects.
+        const delay = Math.min(16_000, 1_000 * 2 ** reconnectAttempt);
+        reconnectAttempt += 1;
+        term.write(
+          `\r\n\x1b[2m[connection closed — reconnecting in ${Math.round(
+            delay / 1_000
+          )}s (attempt ${reconnectAttempt}/${MAX_RECONNECT_ATTEMPTS})…]\x1b[0m\r\n`
+        );
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          connect();
+        }, delay);
+      });
+
+      ws.addEventListener("error", () => {
+        // Errors trigger a close right after, so let the close handler
+        // own the reconnect path — don't double-fire.
+      });
+    };
 
     const dataDisposable = term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "data", data }));
-      }
+      sendIfOpen({ type: "data", data });
     });
 
     const resizeDisposable = term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "resize", cols, rows }));
-      }
+      sendIfOpen({ type: "resize", cols, rows });
     });
 
     // Refit whenever the container resizes — including the very first
@@ -140,12 +202,19 @@ export function TerminalView() {
     });
     ro.observe(container);
 
+    connect();
+
     return () => {
+      cancelled = true;
       ro.disconnect();
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       dataDisposable.dispose();
       resizeDisposable.dispose();
       try {
-        ws.close();
+        currentWs?.close();
       } catch {
         // already closed
       }

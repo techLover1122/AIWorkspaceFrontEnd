@@ -1,6 +1,6 @@
 "use client";
 
-import { DragEvent, useCallback, useEffect, useRef, useState } from "react";
+import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createInitialTabs } from "../../constant/constants";
 import { logTabUrl, openedUrlsUrl, setOpenedUrl, urlsUrl, eventsUrl } from "../../constant/api";
 import { toPublicServiceUrl } from "../../utils/registerService";
@@ -716,8 +716,18 @@ export function WorkspaceShell({
     setChatWidth(DEFAULT_CHAT_WIDTH);
   }, []);
 
+  // Memoize the context value so we don't pass a fresh object literal
+  // on every WorkspaceShell render — that would cascade through
+  // useContext consumers (chat-panel.tsx in particular) and break
+  // their useCallback/useMemo dep stability, defeating the ChatInput
+  // memo and re-rendering the composer on every stream chunk.
+  const tabContextValue = useMemo(
+    () => ({ openTab: handleOpenTab, reloadActiveTab: handleActiveTabReload }),
+    [handleOpenTab, handleActiveTabReload]
+  );
+
   return (
-    <WorkspaceTabContext.Provider value={{ openTab: handleOpenTab, reloadActiveTab: handleActiveTabReload }}>
+    <WorkspaceTabContext.Provider value={tabContextValue}>
     <main className="app-shell">
       <section className="workspace-frame">
         <section

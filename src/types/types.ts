@@ -42,6 +42,15 @@ export type StreamResponse = {
     | "done"
     | "aborted"
     | "permission_request"
+    // Backend resolved a pending permission server-side (5-min user-
+    // absent auto-allow, task abort, etc.). Frontend uses this to close
+    // any stale modal opened by the original `permission_request`.
+    // data: { id, decision: "auto-allow" | "auto-deny", reason: string }.
+    | "permission_resolved"
+    // Backend emits this each turn with cumulative token counts so the
+    // chat header's CompactRing can fill live without needing to poll
+    // a separate endpoint.
+    | "token_usage"
     // Backend emits this every ~15s while the SDK is busy or waiting on a
     // permission decision. Frontend ignores it; its only purpose is to keep
     // the HTTP stream's bytes flowing so proxies (Traefik / Cloudflare /
@@ -49,6 +58,11 @@ export type StreamResponse = {
     | "heartbeat";
   data?: unknown;
   error?: string;
+};
+
+export type TokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
 };
 
 export type ChatAttachmentPayload = {
@@ -139,5 +153,12 @@ export type ChatState = {
   messages: ChatMessage[];
   sessionId: string | null;
   isLoading: boolean;
+  /** Active background task id on the server. Same value space as
+   *  `currentRequestId` was historically — the frontend generates one
+   *  per send. Null means no in-flight task. */
   currentRequestId: string | null;
+  /** Highest seq we've ack'd from the streaming endpoint. Used to resume
+   *  cleanly after a reconnect via `?from=lastSeq+1`. -1 means nothing
+   *  received yet. */
+  lastSeq: number;
 };

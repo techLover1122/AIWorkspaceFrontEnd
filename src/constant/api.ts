@@ -58,6 +58,19 @@ export function chatUrl(): string {
   return `${BACKEND_URL}/api/chat`;
 }
 
+/** GET endpoint that streams events for an existing task. Use `from=<seq>`
+ *  to resume after a reconnect without losing or duplicating events. */
+export function chatStreamUrl(taskId: string, fromSeq: number = 0): string {
+  return `${BACKEND_URL}/api/chat/stream/${encodeURIComponent(taskId)}?from=${fromSeq}`;
+}
+
+/** List active background chat tasks (optionally scoped to a working
+ *  directory) so the frontend can auto-reattach on workspace open. */
+export function chatActiveTasksUrl(workingDirectory?: string): string {
+  if (!workingDirectory) return `${BACKEND_URL}/api/chat/active`;
+  return `${BACKEND_URL}/api/chat/active?workingDirectory=${encodeURIComponent(workingDirectory)}`;
+}
+
 export function abortUrl(requestId: string): string {
   return `${BACKEND_URL}/api/abort/${requestId}`;
 }

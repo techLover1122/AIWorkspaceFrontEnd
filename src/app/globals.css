@@ -938,7 +938,10 @@ button {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px 0;
+  /* No top padding so the sticky user message sits flush against the
+   * chat header instead of leaving a visible gap when stuck. Bottom
+   * padding keeps the last message off the composer's top edge. */
+  padding: 0 0 12px;
   scrollbar-width: thin;
   scrollbar-color: #424242 transparent;
 }
@@ -1432,17 +1435,19 @@ button {
 .msg-user {
   padding: 6px 14px;
   display: flex;
-  /* Stick to the top of the chat-list scroll container so the user's
-   * current prompt stays visible while they scroll through the AI's
-   * (potentially long) reply — Claude.ai-style "header per turn".
-   * Multiple sticky siblings stack naturally: each user message
-   * pushes the previous one out as you scroll backwards through the
-   * conversation, so you always see whichever turn's content is on
-   * screen.
-   *
-   * Background must be opaque (matching the chat panel) so the AI's
-   * reply below doesn't bleed through the sticky header. z-index
-   * keeps it above message content but below modals/overlays. */
+}
+
+/* Only the most-recent user message sticks to the top of the chat-list
+ * scroll viewport, giving Claude.ai-style "current turn header" while
+ * older user messages scroll normally. (Sticking ALL of them stacks
+ * them at the top — the previous prompt shows through behind the
+ * latest one because adjacent sticky siblings overlap rather than
+ * push each other out.)
+ *
+ * Background must be opaque (matching the chat panel) so the AI's
+ * reply below doesn't bleed through the sticky header. z-index keeps
+ * it above message content but below modals / overlays. */
+.msg-user-latest {
   position: sticky;
   top: 0;
   z-index: 5;

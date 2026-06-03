@@ -54,12 +54,95 @@ function findLastStreamingIndex(messages: ChatMessage[]): number {
   return -1;
 }
 
-export function useChatState() {
-  const [state, setState] = useState<ChatState>({
-    messages: [],
-    sessionId: null,
-    isLoading: false,
-    currentRequestId: null,
+/* ============================================================
+   localStorage persistence
+   ------------------------------------------------------------
+   Keyed by workingDirectory so switching projects gets each
+   project's own chat back. We persist messages + sessionId +
+   taskId + lastSeq — `isLoading` is intentionally NOT persisted;
+   it's derived from "is there an active server task" at mount.
+   ============================================================ */
+
+const STORAGE_PREFIX = "aiide.chat.state";
+
+type PersistedSnapshot = {
+  messages: ChatMessage[];
+  sessionId: string | null;
+  taskId: string | null;
+  lastSeq: number;
+};
+
+function storageKey(workingDirectory?: string | null): string {
+  return `${STORAGE_PREFIX}::${workingDirectory ?? "__default__"}`;
+}
+
+function readPersisted(
+  workingDirectory?: string | null
+): PersistedSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(storageKey(workingDirectory));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedSnapshot;
+    if (!parsed || !Array.isArray(parsed.messages)) return null;
+    return {
+      messages: parsed.messages,
+      sessionId: parsed.sessionId ?? null,
+      taskId: parsed.taskId ?? null,
+      lastSeq: typeof parsed.lastSeq === "number" ? parsed.lastSeq : -1,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writePersisted(
+  workingDirectory: string | undefined | null,
+  snapshot: PersistedSnapshot
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      storageKey(workingDirectory),
+      JSON.stringify(snapshot)
+    );
+  } catch {
+    // localStorage may be full / disabled — silently degrade.
+  }
+}
+
+function clearPersisted(workingDirectory?: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(storageKey(workingDirectory));
+  } catch {
+    /* ignore */
+  }
+}
+
+/* ============================================================
+   useChatState
+   ============================================================ */
+
+/**
+ * Backing state for a single chat panel. When `workingDirectory` is
+ * provided, the state is persisted to localStorage keyed by that path —
+ * switching projects and returning later restores each project's
+ * conversation. The persisted snapshot also carries the active server
+ * `taskId` + `lastSeq` so a page reload can reattach to in-flight work.
+ */
+export function useChatState(workingDirectory?: string | null) {
+  // Hydrate synchronously on first mount so the chat panel doesn't
+  // flicker through "empty" before the persisted snapshot loads.
+  const [state, setState] = useState<ChatState>(() => {
+    const persisted = readPersisted(workingDirectory);
+    return {
+      messages: persisted?.messages ?? [],
+      sessionId: persisted?.sessionId ?? null,
+      isLoading: false,
+      currentRequestId: persisted?.taskId ?? null,
+      lastSeq: persisted?.lastSeq ?? -1,
+    };
   });
 
   const stateRef = useRef(state);
@@ -132,6 +215,46 @@ export function useChatState() {
     };
   }, []);
 
+  // When the workspace switches projects, swap to that project's
+  // persisted chat. workingDirectory acts as the namespace key.
+  const lastWorkingDirRef = useRef<string | null | undefined>(workingDirectory);
+  useEffect(() => {
+    if (lastWorkingDirRef.current === workingDirectory) return;
+    lastWorkingDirRef.current = workingDirectory;
+    // Discard any half-buffered chunk from the previous project's stream.
+    pendingChunkRef.current = "";
+    if (rafIdRef.current !== null) {
+      cancelRaf(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    const persisted = readPersisted(workingDirectory);
+    setState({
+      messages: persisted?.messages ?? [],
+      sessionId: persisted?.sessionId ?? null,
+      isLoading: false,
+      currentRequestId: persisted?.taskId ?? null,
+      lastSeq: persisted?.lastSeq ?? -1,
+    });
+  }, [workingDirectory]);
+
+  // Persist on any meaningful state change. `isLoading` isn't persisted —
+  // it gets re-derived when the chat panel decides whether to reattach
+  // to the stored taskId on mount.
+  useEffect(() => {
+    writePersisted(workingDirectory, {
+      messages: state.messages,
+      sessionId: state.sessionId,
+      taskId: state.currentRequestId,
+      lastSeq: state.lastSeq,
+    });
+  }, [
+    workingDirectory,
+    state.messages,
+    state.sessionId,
+    state.currentRequestId,
+    state.lastSeq,
+  ]);
+
   const addMessage = useCallback(
     (message: ChatMessage) => {
       flushPending();
@@ -195,6 +318,25 @@ export function useChatState() {
     setState((prev) => ({ ...prev, currentRequestId: id }));
   }, []);
 
+  const setLastSeq = useCallback((seq: number) => {
+    // Cursor advances ONLY on strictly-increasing seq. This protects
+    // against the backend's "re-emit pending permission" path sending
+    // an old permission_request seq on reattach — if we accepted
+    // smaller seqs the resume cursor would regress and the next
+    // reconnect would re-fetch already-processed events.
+    setState((prev) => (seq <= prev.lastSeq ? prev : { ...prev, lastSeq: seq }));
+  }, []);
+
+  /**
+   * Force-reset the seq cursor to -1. Called when starting a brand-new
+   * task (the new task's first event is at seq 0, so the next attach
+   * needs `from=0` not `from=oldHighWater+1`). Bypasses the monotonic
+   * guard on setLastSeq — that's only for stream-callback writes.
+   */
+  const resetSeqCursor = useCallback(() => {
+    setState((prev) => (prev.lastSeq === -1 ? prev : { ...prev, lastSeq: -1 }));
+  }, []);
+
   const setMessages = useCallback(
     (messages: ChatMessage[]) => {
       // Discard any buffered streaming chunk — it belongs to whatever
@@ -215,8 +357,15 @@ export function useChatState() {
       cancelRaf(rafIdRef.current);
       rafIdRef.current = null;
     }
-    setState({ messages: [], sessionId: null, isLoading: false, currentRequestId: null });
-  }, []);
+    setState({
+      messages: [],
+      sessionId: null,
+      isLoading: false,
+      currentRequestId: null,
+      lastSeq: -1,
+    });
+    clearPersisted(workingDirectory);
+  }, [workingDirectory]);
 
   return {
     state,
@@ -227,6 +376,8 @@ export function useChatState() {
     setSessionId,
     setLoading,
     setCurrentRequestId,
+    setLastSeq,
+    resetSeqCursor,
     setMessages,
     reset,
     stateRef,
