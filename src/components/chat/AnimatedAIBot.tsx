@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MiniBot } from "./MiniBot";
 import type { ChatMessage } from "../../types/types";
 
@@ -112,28 +112,91 @@ const TRANSLATIONS: Record<StatusKey, Record<Lang, string>> = {
   Loading:   { en: "Loading",   es: "Cargando",     el: "Φορτώνω",      la: "Onerans" },
 };
 
-const LANG_CYCLE_MS = 1_600;
+// Typewriter timings — kept loose so the rhythm feels natural, not
+// metronomic. Hold lingers a bit longer than type+delete so the user
+// can actually read each translation before it scrubs away.
+const TYPE_IN_MS = 75;
+const TYPE_OUT_MS = 40;
+const HOLD_FULL_MS = 700;
+const HOLD_EMPTY_MS = 200;
 
 export function TypingIndicator({ messages }: { messages: ChatMessage[] }) {
   const status = deriveStatus(messages);
-  // Local language index — advances on a timer while the indicator is
-  // mounted. Mounting/unmounting takes care of starting/stopping the
-  // cycle, since the indicator is only rendered while isLoading is on.
-  const [langIdx, setLangIdx] = useState(0);
+  // Keep status in a ref so the typewriter loop reads the latest
+  // value on each tick instead of capturing the mount-time closure
+  // (status flips during a turn: Thinking → Editing → Writing …).
+  const statusRef = useRef(status);
+  statusRef.current = status;
+
+  const [displayText, setDisplayText] = useState("");
+  const [langCode, setLangCode] = useState<Lang>("en");
+
+  // Single self-scheduled loop owns the typewriter cycle: types the
+  // current language's word in letter-by-letter, holds, deletes, then
+  // advances to the next language and repeats. The lang change ONLY
+  // happens between word cycles — within a single word the shimmer
+  // and font style stay coherent.
   useEffect(() => {
-    const id = window.setInterval(() => {
-      setLangIdx((i) => (i + 1) % LANGUAGES.length);
-    }, LANG_CYCLE_MS);
-    return () => window.clearInterval(id);
+    let cancelled = false;
+    let langIdx = 0;
+    let phase: "typing" | "deleting" = "typing";
+    let pos = 0;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    const schedule = (fn: () => void, ms: number): void => {
+      timerId = setTimeout(() => {
+        timerId = null;
+        if (!cancelled) fn();
+      }, ms);
+    };
+
+    const tick = (): void => {
+      if (cancelled) return;
+      const lang = LANGUAGES[langIdx];
+      const word = TRANSLATIONS[statusRef.current][lang];
+      setLangCode(lang);
+
+      if (phase === "typing") {
+        // Clamp pos in case status changed mid-cycle to a shorter word.
+        pos = Math.min(pos + 1, word.length);
+        setDisplayText(word.slice(0, pos));
+        if (pos >= word.length) {
+          // Fully typed — hold, then start deleting.
+          schedule(() => {
+            phase = "deleting";
+            tick();
+          }, HOLD_FULL_MS);
+        } else {
+          schedule(tick, TYPE_IN_MS);
+        }
+        return;
+      }
+
+      // phase === "deleting"
+      pos = Math.max(pos - 1, 0);
+      setDisplayText(word.slice(0, pos));
+      if (pos <= 0) {
+        // Fully erased — brief pause, advance language, type next word.
+        langIdx = (langIdx + 1) % LANGUAGES.length;
+        phase = "typing";
+        schedule(tick, HOLD_EMPTY_MS);
+      } else {
+        schedule(tick, TYPE_OUT_MS);
+      }
+    };
+
+    tick();
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
   }, []);
 
-  const lang = LANGUAGES[langIdx];
-  const word = TRANSLATIONS[status][lang];
   return (
     <span className="typing-indicator" aria-live="polite">
       <MiniBot />
-      <span className="typing-indicator-text" lang={lang}>
-        {word}
+      <span className="typing-indicator-text" lang={langCode}>
+        {displayText}
       </span>
     </span>
   );
