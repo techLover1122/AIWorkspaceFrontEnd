@@ -1943,6 +1943,21 @@ button {
   background: rgba(167, 139, 250, 0.28);
 }
 
+.tool-icon-btn:disabled,
+.tool-icon-btn:disabled:hover {
+  opacity: 0.4;
+  background: transparent;
+  color: var(--vsc-text-muted);
+  cursor: not-allowed;
+}
+
+.edit-mode-chip:disabled,
+.edit-mode-chip:disabled:hover {
+  opacity: 0.4;
+  background: transparent;
+  cursor: not-allowed;
+}
+
 /* --- Edit mode chip (right side) --- */
 
 .edit-mode-chip {

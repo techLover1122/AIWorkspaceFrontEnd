@@ -401,7 +401,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               type="button"
               className="tool-icon-btn"
               onClick={() => fileInputRef.current?.click()}
-              title="Attach files"
+              disabled={isLoading}
+              title={isLoading ? "Disabled while Claude is responding" : "Attach files"}
               aria-label="Attach files"
             >
               <IconPlus />
@@ -411,7 +412,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 type="button"
                 className="tool-icon-btn"
                 onClick={onAddEnvironmentPack}
-                title="Add environment pack"
+                disabled={isLoading}
+                title={isLoading ? "Disabled while Claude is responding" : "Add environment pack"}
                 aria-label="Add environment pack"
               >
                 <IconPackage />
@@ -421,7 +423,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               type="button"
               className="tool-icon-btn"
               onClick={openSlashMenu}
-              title="Slash commands"
+              disabled={isLoading}
+              title={isLoading ? "Disabled while Claude is responding" : "Slash commands"}
               aria-label="Slash commands"
             >
               <IconSlash />
@@ -434,8 +437,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               type="button"
               className={`tool-icon-btn${showToolDetails ? " active" : ""}`}
               onClick={onToggleToolDetails}
+              disabled={isLoading}
               title={
-                showToolDetails
+                isLoading
+                  ? "Disabled while Claude is responding"
+                  : showToolDetails
                   ? "Hide tool details (tool calls, results, thinking)"
                   : "Show tool details (tool calls, results, thinking)"
               }
@@ -449,7 +455,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               className="edit-mode-chip"
               data-mode={permissionMode}
               onClick={onToggleMode}
-              title="Toggle permission mode (Ctrl+Shift+M)"
+              disabled={isLoading}
+              title={
+                isLoading
+                  ? "Disabled while Claude is responding"
+                  : "Toggle permission mode (Ctrl+Shift+M)"
+              }
             >
               <IconCode />
               <span>{MODE_LABEL[permissionMode]}</span>

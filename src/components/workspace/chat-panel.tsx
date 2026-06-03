@@ -6,10 +6,11 @@ import type {
   ChatMessage,
   PermissionMode,
   PermissionRequest,
+  ProjectInfo,
 } from "../../types/types";
 import { useClaudeStreaming } from "../../hooks/useClaudeStreaming";
 import { useChatState, createUserMessage } from "../../hooks/useChatState";
-import { INSTANCE_IP, conversationUrl, eventsUrl, permissionDecisionUrl, portScanUrl } from "../../constant/api";
+import { INSTANCE_IP, conversationUrl, eventsUrl, permissionDecisionUrl, portScanUrl, projectsUrl } from "../../constant/api";
 import { convertHistoryMessages } from "../../utils/messageConverter";
 import { ChatMessages } from "../chat/ChatMessages";
 import {
@@ -64,6 +65,63 @@ function readFileAsBase64(
   });
 }
 
+/* ------------------------------------------------------------------
+ * Last-active-session persistence
+ *
+ * Without this, every page refresh / workspace reopen lands the user
+ * on a blank chat even though their previous conversation is still on
+ * disk (the backend keeps full transcripts under ~/.claude/projects/).
+ * We remember the sessionId per working directory in localStorage and
+ * replay the same history-load path that the manual History view uses.
+ * Scoped per cwd so switching projects doesn't pull the wrong chat in.
+ * ------------------------------------------------------------------ */
+const LAST_SESSION_KEY = "ai-ide:last-session-by-cwd";
+
+function loadLastSessionMap(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(LAST_SESSION_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, string>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLastSessionMap(map: Record<string, string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LAST_SESSION_KEY, JSON.stringify(map));
+  } catch {
+    // Quota exceeded or storage disabled — silently ignore.
+  }
+}
+
+function rememberLastSession(cwd: string | undefined, sessionId: string): void {
+  if (!cwd || !sessionId) return;
+  const map = loadLastSessionMap();
+  if (map[cwd] === sessionId) return;
+  map[cwd] = sessionId;
+  writeLastSessionMap(map);
+}
+
+function forgetLastSession(cwd: string | undefined): void {
+  if (!cwd) return;
+  const map = loadLastSessionMap();
+  if (!(cwd in map)) return;
+  delete map[cwd];
+  writeLastSessionMap(map);
+}
+
+// HistoryView uses the same normalization to match cwd against the
+// backend's project list — keep them in sync.
+function normalizeCwd(p: string): string {
+  return p.toLowerCase().replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
 type ChatPanelProps = {
   workingDirectory?: string;
   onChangeProject?: (path: string) => void;
@@ -84,6 +142,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
     setLoading,
     setCurrentRequestId,
     setMessages,
+    stateRef,
   } = useChatState();
   const { send, abort } = useClaudeStreaming();
 
@@ -119,6 +178,71 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
 
   const connection = useConnectionStatus();
   const isConnected = connection.status === "connected";
+
+  // Persist the active sessionId as soon as the backend assigns one,
+  // keyed by working directory. Empty/null is intentional — we only
+  // record real sessions, and explicit clears call forgetLastSession.
+  useEffect(() => {
+    if (state.sessionId) rememberLastSession(workingDirectory, state.sessionId);
+  }, [state.sessionId, workingDirectory]);
+
+  // Restore the last active chat for this cwd on first connect.
+  // Guarded by restoredForRef so the setMessages/setSessionId calls
+  // we make below don't re-trigger the effect, and by the empty-chat
+  // check so we never yank a user out of a chat they're already in.
+  const restoredForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isConnected || !workingDirectory) return;
+    if (restoredForRef.current === workingDirectory) return;
+    restoredForRef.current = workingDirectory;
+
+    const lastSessionId = loadLastSessionMap()[workingDirectory];
+    if (!lastSessionId) return;
+    if (stateRef.current.sessionId || stateRef.current.messages.length > 0) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const projRes = await fetch(projectsUrl());
+        const projData = (await projRes.json()) as { projects?: ProjectInfo[] };
+        if (cancelled) return;
+        const target = normalizeCwd(workingDirectory);
+        const project = (projData.projects ?? []).find(
+          (p) => normalizeCwd(p.path) === target
+        );
+        if (!project) {
+          // Backend no longer knows this project — stale entry, drop it.
+          forgetLastSession(workingDirectory);
+          return;
+        }
+        const convRes = await fetch(
+          conversationUrl(project.encodedName, lastSessionId)
+        );
+        if (!convRes.ok) {
+          // 404 means the on-disk transcript is gone (deleted/rotated);
+          // anything else is transient and worth keeping for next try.
+          if (convRes.status === 404) forgetLastSession(workingDirectory);
+          return;
+        }
+        const convData: { messages?: unknown[] } = await convRes.json();
+        const converted = convertHistoryMessages(convData.messages ?? []);
+        if (cancelled) return;
+        // Re-check — user may have typed or picked another chat while
+        // we were fetching.
+        if (stateRef.current.sessionId || stateRef.current.messages.length > 0) {
+          return;
+        }
+        setSessionId(lastSessionId);
+        setMessages(converted);
+      } catch {
+        // Network blip — leave the stored entry alone, retry next mount.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isConnected, workingDirectory, setSessionId, setMessages, stateRef]);
 
   const handleReuseMessage = useCallback((text: string) => {
     chatInputRef.current?.setDraft(text);
@@ -595,6 +719,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         case "clear":
           setMessages([]);
           setSessionId("");
+          forgetLastSession(workingDirectory);
           setPermissionRequest(null);
           setPlanRequest(null);
           break;
@@ -616,6 +741,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
           // flash through behind the ConnectScreen during the auth wipe.
           setMessages([]);
           setSessionId("");
+          forgetLastSession(workingDirectory);
           setPermissionRequest(null);
           setPlanRequest(null);
           void connection.disconnect();
@@ -632,6 +758,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       fetchAndShowPorts,
       tabCtx,
       connection,
+      workingDirectory,
     ]
   );
 
@@ -679,6 +806,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
               if (!ok) return;
               setMessages([]);
               setSessionId("");
+              forgetLastSession(workingDirectory);
               setPermissionRequest(null);
               setPlanRequest(null);
             }}
@@ -694,6 +822,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
             onClick={() => {
               setMessages([]);
               setSessionId("");
+              forgetLastSession(workingDirectory);
             }}
             title="New chat"
             aria-label="New chat"

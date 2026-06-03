@@ -63,13 +63,63 @@ export function useClaudeStreaming() {
         },
       };
 
+      // Silent-retry policy for the INITIAL POST. If the fetch never gets a
+      // response (DNS hiccup, refused connection, transient 5xx) we retry up
+      // to 3 times with backoff before surfacing an error — this is the
+      // common "wifi just blipped" case where the user shouldn't see the
+      // flow break. Once even one byte of the stream has been delivered we
+      // STOP retrying: the SDK call has started server-side, and a fresh
+      // POST would duplicate the turn. (Full mid-stream resume requires the
+      // server-side task model — tracked in memory as a deferred feature.)
+      const INITIAL_RETRY_MAX = 3;
+      const INITIAL_RETRY_BACKOFF_MS = [400, 900, 1800];
+
+      let response: Response | null = null;
+      let lastError: Error | null = null;
+      for (let attempt = 0; attempt <= INITIAL_RETRY_MAX; attempt++) {
+        if (controller.signal.aborted) break;
+        try {
+          response = await fetch(chatUrl(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(request),
+            signal: controller.signal,
+          });
+          // 5xx might be transient — retry. 4xx is the caller's fault, don't.
+          if (response.status >= 500 && response.status < 600 && attempt < INITIAL_RETRY_MAX) {
+            lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
+            response = null;
+          } else {
+            break;
+          }
+        } catch (err: unknown) {
+          if (controller.signal.aborted) {
+            settled = true;
+            break;
+          }
+          lastError =
+            err instanceof Error ? err : new Error(String(err));
+          // Abort errors aren't network issues — let the outer handler deal.
+          if (lastError.name === "AbortError") break;
+        }
+        if (attempt < INITIAL_RETRY_MAX) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, INITIAL_RETRY_BACKOFF_MS[attempt])
+          );
+        }
+      }
+
       try {
-        const response = await fetch(chatUrl(), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(request),
-          signal: controller.signal,
-        });
+        if (!response) {
+          if (!settled) {
+            wrapped.onError(
+              lastError
+                ? `Couldn't reach Claude after ${INITIAL_RETRY_MAX + 1} attempts: ${lastError.message}`
+                : "Couldn't reach Claude. Check your connection."
+            );
+          }
+          return;
+        }
 
         if (!response.ok) {
           wrapped.onError(`HTTP ${response.status}: ${response.statusText}`);
@@ -86,10 +136,12 @@ export function useClaudeStreaming() {
         const decoder = new TextDecoder();
         let buffer = "";
         const toolRegistry = new Map<string, string>();
+        let receivedAnyBytes = false;
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (value && value.byteLength > 0) receivedAnyBytes = true;
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
@@ -112,14 +164,23 @@ export function useClaudeStreaming() {
         }
 
         // Stream closed cleanly but no "done" event arrived — server hung up
-        // mid-turn (session end, backend crash, proxy timeout). Surface it so
-        // the user sees an error message instead of a frozen typing bubble.
+        // mid-turn (session end, backend crash, proxy timeout). Without a
+        // server-side task model we can't auto-resume; surface as a SOFT
+        // info message (not a red error) so the user can resend "continue"
+        // and pick up. Distinguishes "Claude crashed" from "you got no
+        // response at all", which is the more common UX confusion.
         if (!settled) {
-          wrapped.onError(
-            "Connection to Claude ended before the response finished. " +
-              "The session may have timed out or the backend disconnected. " +
-              "Please try again."
-          );
+          if (receivedAnyBytes) {
+            wrapped.onError(
+              "The connection dropped before Claude finished. " +
+                "Your partial reply above was saved. Send \"continue\" " +
+                "to resume."
+            );
+          } else {
+            wrapped.onError(
+              "Couldn't reach Claude — no response received. Please try again."
+            );
+          }
         }
       } catch (err: unknown) {
         if (controller.signal.aborted) {

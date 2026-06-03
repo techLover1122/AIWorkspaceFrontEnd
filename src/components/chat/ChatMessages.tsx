@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useRef, useState, useCallback } from "react";
 import type { ChatMessage } from "../../types/types";
 import { INSTANCE_IP } from "../../constant/api";
 import { useWorkspaceTab } from "../../contexts/WorkspaceTabContext";
@@ -158,15 +158,30 @@ export function ChatMessages({
   );
 }
 
-function Message({
-  message,
-  onReuse,
-  showToolDetails,
-}: {
+type MessageProps = {
   message: ChatMessage;
   onReuse?: (text: string) => void;
   showToolDetails: boolean;
-}) {
+};
+
+/**
+ * Wrap Message in React.memo so non-streaming messages skip render when the
+ * messages array gets a new reference (which happens on every streaming
+ * chunk). useChatState.appendToLastMessage only replaces the streaming
+ * message object — every other entry keeps its identity, so shallow
+ * equality on `message` correctly short-circuits them.
+ *
+ * Without this, a 200-message chat re-ran ReactMarkdown for all 200 on
+ * every text chunk arriving from the SDK — which is what made typing
+ * feel glacial in long sessions.
+ */
+const Message = memo(MessageImpl);
+
+function MessageImpl({
+  message,
+  onReuse,
+  showToolDetails,
+}: MessageProps) {
   // Internal AI traces — only shown when the user explicitly enables the
   // detail view from the composer. Default is hidden so the chat reads like
   // a normal conversation instead of dumping TodoWrite/tool JSON in-line.
@@ -276,17 +291,21 @@ function Message({
    User message card — avatar + "You" label + copy button
    ============================================================ */
 
-function UserMessage({
-  messageId,
-  content,
-  imageUrls,
-  onReuse,
-}: {
+type UserMessageProps = {
   messageId: string;
   content: string;
   imageUrls?: string[];
   onReuse?: (text: string) => void;
-}) {
+};
+
+const UserMessage = memo(UserMessageImpl);
+
+function UserMessageImpl({
+  messageId,
+  content,
+  imageUrls,
+  onReuse,
+}: UserMessageProps) {
   const [copied, setCopied] = useState(false);
   const [zoomedUrl, setZoomedUrl] = useState<string | null>(null);
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useWorkspaceTab } from "../../contexts/WorkspaceTabContext";
@@ -20,8 +21,12 @@ type MarkdownContentProps = {
  * user a raw URL to click; every URL becomes a one-click "open this in
  * a new tab" action so it lands inside the iframe rail instead of
  * popping a browser tab (which loses CORS context, breaks cookies, etc).
+ *
+ * Wrapped in React.memo: parsing markdown for finalized messages is
+ * expensive (long chats had ~N markdown re-parses per streaming chunk
+ * before this). With memo, only the actively streaming bubble re-parses.
  */
-export function MarkdownContent({ content, streaming }: MarkdownContentProps) {
+function MarkdownContentImpl({ content, streaming }: MarkdownContentProps) {
   const tabCtx = useWorkspaceTab();
 
   return (
@@ -102,3 +107,5 @@ export function MarkdownContent({ content, streaming }: MarkdownContentProps) {
     </div>
   );
 }
+
+export const MarkdownContent = memo(MarkdownContentImpl);
