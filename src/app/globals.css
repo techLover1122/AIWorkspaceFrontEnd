@@ -1407,6 +1407,22 @@ button {
   animation: botCursor 0.75s steps(1) infinite;
 }
 
+/* --- Auto-load older turns sentinel ---
+ *
+ * Invisible scroll target at the top of the chat list. When it
+ * enters the viewport (or comes within 200px of doing so per the
+ * IntersectionObserver rootMargin in ChatMessages.tsx), the next
+ * batch of older turns is appended silently and scroll position is
+ * preserved by the useLayoutEffect in the same file. No button, no
+ * UI noise — feels like the chat just always has the history there
+ * when the user scrolls back. Height kept small so it doesn't push
+ * real content down. */
+.chat-list-load-older-sentinel {
+  height: 1px;
+  width: 100%;
+  pointer-events: none;
+}
+
 /* --- User message --- */
 
 /* Each "turn" wraps one user prompt + the assistant content that

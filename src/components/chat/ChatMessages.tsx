@@ -1,6 +1,13 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, useCallback } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { ChatMessage } from "../../types/types";
 import { INSTANCE_IP } from "../../constant/api";
 import { useWorkspaceTab } from "../../contexts/WorkspaceTabContext";
@@ -181,12 +188,112 @@ type ChatMessagesProps = {
   showToolDetails?: boolean;
 };
 
+/* ============================================================
+   Turn-level pagination — render the latest N turns by default
+   ------------------------------------------------------------
+   Even with React.memo on Message, a 200-message chat still walks
+   the whole list on every streaming chunk (React diffs the parent's
+   children). That's what made typing feel slow in long sessions.
+
+   We bound the rendered window to the most recent N turns. Older
+   turns stay in state (so they're still persisted to localStorage,
+   restored across reloads, exported as transcripts), they just
+   don't reach the DOM until the user clicks "Load older turns".
+
+   N = 20 is generous — covers a normal half-hour session without
+   hiding anything. The mechanism is purely a render-time cap, so
+   no message data is ever lost. Streaming targets the LAST message
+   (which is always inside the window) so word-by-word typing speed
+   is unaffected by how many old turns exist behind the scenes.
+   ============================================================ */
+const TURNS_PAGE_SIZE = 20;
+
 export function ChatMessages({
   messages,
   onReuse,
   showToolDetails = false,
 }: ChatMessagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [visibleTurnCount, setVisibleTurnCount] = useState(TURNS_PAGE_SIZE);
+
+  // Reset the window when the underlying conversation is REPLACED
+  // (clear, switch project, restore from history). Detected by the
+  // first message id changing — appending a new message doesn't trip
+  // this because the first message's id stays stable.
+  const prevFirstMsgIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const firstMsgId = messages[0]?.id ?? null;
+    if (prevFirstMsgIdRef.current === firstMsgId) return;
+    prevFirstMsgIdRef.current = firstMsgId;
+    setVisibleTurnCount(TURNS_PAGE_SIZE);
+  }, [messages]);
+
+  // Scroll preservation when "Load older" reveals more content at
+  // the top — without this the user's view would jump up by the
+  // height of the newly-revealed content. Capture scrollHeight before
+  // expansion, restore the delta after layout.
+  const pendingScrollRestoreRef = useRef<{
+    prevScrollHeight: number;
+    prevScrollTop: number;
+  } | null>(null);
+  // Re-armed after each load. Prevents the IntersectionObserver from
+  // firing repeatedly while a load is mid-flight; cleared the moment
+  // useLayoutEffect finishes restoring scroll position.
+  const loadingMoreRef = useRef(false);
+  useLayoutEffect(() => {
+    const pending = pendingScrollRestoreRef.current;
+    if (pending) {
+      pendingScrollRestoreRef.current = null;
+      const el = scrollRef.current;
+      if (el) {
+        const delta = el.scrollHeight - pending.prevScrollHeight;
+        el.scrollTop = pending.prevScrollTop + delta;
+      }
+    }
+    // Always re-arm after layout — even if there was no pending
+    // restoration (first render, abort path, etc.) so the next
+    // intersection can fire.
+    loadingMoreRef.current = false;
+  }, [visibleTurnCount]);
+
+  const handleLoadOlder = useCallback(() => {
+    if (loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    const el = scrollRef.current;
+    if (el) {
+      pendingScrollRestoreRef.current = {
+        prevScrollHeight: el.scrollHeight,
+        prevScrollTop: el.scrollTop,
+      };
+    }
+    setVisibleTurnCount((n) => n + TURNS_PAGE_SIZE);
+  }, []);
+
+  // Auto-load older turns when the sentinel at the top of the list
+  // enters the viewport. Replaces the explicit "Load older" button —
+  // the user just scrolls up and more content streams in silently.
+  // rootMargin: 200px so we start fetching the next batch BEFORE the
+  // user hits the absolute top, hiding the load behind their scroll
+  // momentum.
+  const loadOlderSentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const sentinel = loadOlderSentinelRef.current;
+    const root = scrollRef.current;
+    if (!sentinel || !root) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            handleLoadOlder();
+            break;
+          }
+        }
+      },
+      { root, rootMargin: "200px 0px 0px 0px", threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [handleLoadOlder, visibleTurnCount]);
   // Stick-to-bottom is the "follow streaming text down" mode — engaged
   // when the user is near the bottom, disengaged when they scroll up.
   // Combined with CSS `position: sticky` on `.msg-user`, this gives
@@ -296,9 +403,33 @@ export function ChatMessages({
   // on top of each other instead of replacing one another.)
   const turns = groupIntoTurns(messages);
 
+  // Render only the LAST `visibleTurnCount` turns. Older turns stay
+  // in state but are not in the DOM — that's the render bound that
+  // keeps streaming fast in long sessions. See the comment block on
+  // TURNS_PAGE_SIZE above for the reasoning.
+  const hiddenTurnCount = Math.max(0, turns.length - visibleTurnCount);
+  const visibleTurns = hiddenTurnCount > 0 ? turns.slice(hiddenTurnCount) : turns;
+  // How many turns the next "Load older" click would reveal — clamped
+  // so the button label tells the truth even on the final batch.
+  const nextBatch = Math.min(hiddenTurnCount, TURNS_PAGE_SIZE);
+
   return (
     <div ref={scrollRef} className="chat-list" role="log" aria-live="polite">
-      {turns.map((turn, turnIdx) => (
+      {hiddenTurnCount > 0 && (
+        // Silent sentinel for auto-load. As soon as it enters the
+        // viewport (or comes within 200px of doing so) the
+        // IntersectionObserver fires and reveals the next batch of
+        // older turns. nextBatch is read only to seed the aria label
+        // for screen readers — no visible chrome.
+        <div
+          ref={loadOlderSentinelRef}
+          className="chat-list-load-older-sentinel"
+          aria-hidden
+          data-hidden-turns={hiddenTurnCount}
+          data-next-batch={nextBatch}
+        />
+      )}
+      {visibleTurns.map((turn, turnIdx) => (
         <div key={turn[0]?.id ?? turnIdx} className="msg-turn">
           {turn.map((msg) => (
             <Message
