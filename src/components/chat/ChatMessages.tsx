@@ -635,7 +635,12 @@ function UserMessageImpl({
           </span>
         </div>
         {content && (
-          <>
+          // Wrapper exists purely so the absolutely-positioned
+          // "Show more" button anchors to the text — not to the whole
+          // card. That way image attachments below don't get
+          // overlapped by the button, and a hidden button costs zero
+          // vertical layout space.
+          <div className="msg-user-text-wrap">
             <div
               className={`msg-user-text${showCollapsed ? " collapsed" : ""}`}
             >
@@ -651,7 +656,7 @@ function UserMessageImpl({
                 {expanded ? "Show less" : "Show more"}
               </button>
             )}
-          </>
+          </div>
         )}
         {imageUrls && imageUrls.length > 0 && (
           <div className="msg-user-images">

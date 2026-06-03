@@ -1445,10 +1445,15 @@ button {
   );
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
-  padding: 8px 12px 10px;
+  /* Bottom padding was 10px; tightened to 6px so a collapsed 2-line
+   * prompt doesn't leave a big dead band underneath. */
+  padding: 6px 12px 6px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  /* Was 4px between children — 2px is enough since the user-meta row
+   * and the text body don't need much separation when the text is
+   * clamped to 2 lines. */
+  gap: 2px;
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
@@ -1527,13 +1532,20 @@ button {
   color: var(--vsc-text-emphasis);
 }
 
+/* Wraps the text + the absolutely-positioned "Show more" button. It's
+ * the positioning context for the button so the button anchors to the
+ * text area rather than the card (which can also contain image
+ * attachments below the text). */
+.msg-user-text-wrap {
+  position: relative;
+}
+
 .msg-user-text {
   color: var(--vsc-text-emphasis);
   font-size: 13px;
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
-  position: relative;
 }
 
 /* Collapsed long user prompts: clamp to 2 lines with a soft fade at
@@ -1553,26 +1565,37 @@ button {
   mask-image: linear-gradient(180deg, #000 70%, transparent 100%);
 }
 
-/* Show-more / show-less toggle. Always present but only visible on
- * hover (or keyboard focus) so short prompts that don't trip the
- * collapse threshold get no UI clutter, and long ones don't fight
- * the prompt text for attention until the user reaches for them. */
+/* Show-more / show-less toggle.
+ *
+ * Positioned ABSOLUTELY in the bottom-right corner of the card so it
+ * doesn't reserve layout space when invisible — the previous
+ * margin-top + inline-flow layout left a ~28px dead band below the
+ * clamped text. Now hidden buttons cost zero vertical pixels.
+ *
+ * Visible only on hover/focus so short prompts that don't trip the
+ * collapse threshold get no UI clutter. The button overlays the soft
+ * fade gradient at the bottom of `.msg-user-text.collapsed`, which is
+ * intentional — that fade is already a "there's more" cue, and the
+ * button sits right where the user's eye lands. */
 .msg-user-expand {
-  margin-top: 4px;
-  align-self: flex-start;
-  background: transparent;
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  background: var(--vsc-panel);
   border: 1px solid var(--vsc-border);
   color: var(--vsc-text-link);
   font-size: 11px;
-  padding: 2px 8px;
+  padding: 1px 8px;
   border-radius: 10px;
   cursor: pointer;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 .msg-user-card:hover .msg-user-expand,
 .msg-user-expand:focus-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 .msg-user-expand:hover {
   background: rgba(55, 148, 255, 0.1);
