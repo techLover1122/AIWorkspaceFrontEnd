@@ -1536,14 +1536,14 @@ button {
   position: relative;
 }
 
-/* Collapsed long user prompts: clamp to 5 lines with a soft fade at
+/* Collapsed long user prompts: clamp to 2 lines with a soft fade at
  * the bottom so the user can tell there's more without it eating
  * scroll real estate. The "Show more" button (.msg-user-expand) reveals
  * the full text. line-clamp uses the -webkit-box layout that all
  * modern browsers support. */
 .msg-user-text.collapsed {
   display: -webkit-box;
-  -webkit-line-clamp: 5;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   /* Visual hint that there's hidden content — soft fade on the last

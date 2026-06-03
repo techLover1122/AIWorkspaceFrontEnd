@@ -41,6 +41,13 @@ type StreamingCallbacks = {
    *  UI can show a subtle "reconnecting…" hint without showing a fatal
    *  error. */
   onReconnecting?: (attempt: number) => void;
+  /** Fired when the server returns 404 for a taskId we tried to attach
+   *  to — meaning the task was wiped from the in-memory TaskRegistry
+   *  (backend restarted or the 30-min idle TTL evicted it). This is NOT
+   *  an error from the user's perspective; the chat UI should silently
+   *  clear the stale taskId + lastSeq and optionally drop a soft note
+   *  in the transcript so the user can continue with a fresh send. */
+  onTaskGone?: () => void;
   onDone: () => void;
   onError: (error: string) => void;
 };
@@ -151,10 +158,16 @@ export function useClaudeStreaming() {
           const response = await fetch(url, { signal: controller.signal });
 
           if (response.status === 404) {
-            wrapped.onError(
-              "The previous chat task is no longer available on the server. " +
-                "Send a new message to start a fresh task."
-            );
+            // The task was wiped (backend restart / 30-min idle TTL).
+            // Soft-handle: tell the chat panel to clear local taskId
+            // bookkeeping and surface a friendly note instead of a red
+            // error. Use the settled latch so subsequent reconnect
+            // attempts on the same attach loop don't double-fire.
+            if (!settled) {
+              settled = true;
+              callbacks.onTaskGone?.();
+              callbacks.onDone();
+            }
             return;
           }
           if (!response.ok) {

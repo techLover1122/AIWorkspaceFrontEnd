@@ -509,11 +509,15 @@ type UserMessageProps = {
 
 const UserMessage = memo(UserMessageImpl);
 
-// Long-prompt collapse threshold. We only collapse content that's
-// clearly verbose — short paragraphs stay fully visible. The number
-// is intentionally generous (a typical 1-3 sentence prompt clears
-// it) so the collapse doesn't kick in for normal questions.
-const USER_MSG_COLLAPSE_THRESHOLD = 280;
+// Long-prompt collapse threshold. Anything beyond this char count gets
+// clamped to 2 lines (see `.msg-user-text.collapsed` in globals.css)
+// with a "Show more" toggle that appears on hover. 80 chars is a
+// rough conservative estimate for what fits in 2 lines at the chat
+// panel width + 13px font — a short one-liner still renders untouched.
+// Also force the collapse if the content contains a newline, since a
+// 2-line clamp shouldn't be defeated by a one-character `\n` getting
+// under the char threshold.
+const USER_MSG_COLLAPSE_THRESHOLD = 80;
 
 function UserMessageImpl({
   messageId,
@@ -525,7 +529,8 @@ function UserMessageImpl({
   const [copied, setCopied] = useState(false);
   const [zoomedUrl, setZoomedUrl] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const isLong = content.length > USER_MSG_COLLAPSE_THRESHOLD;
+  const isLong =
+    content.length > USER_MSG_COLLAPSE_THRESHOLD || content.includes("\n");
   const showCollapsed = isLong && !expanded;
 
   const handleCopy = async () => {

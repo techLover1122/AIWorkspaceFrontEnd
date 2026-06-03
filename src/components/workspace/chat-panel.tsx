@@ -401,6 +401,25 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       onSessionId: (id: string) => setSessionId(id),
       onTokenUsage: (usage: { inputTokens: number; outputTokens: number }) =>
         setTokenUsage(usage),
+      onTaskGone: () => {
+        // Task no longer exists on the server (backend restart, 30-min
+        // idle TTL eviction). Soft-clear the stale taskId + seq so the
+        // next prompt starts a fresh task instead of trying to reattach.
+        // Drop a quiet system note in the transcript instead of the red
+        // "previous task is no longer available" error — losing access
+        // to a server-side bookkeeping entry isn't something the user
+        // can do anything about; their NEXT prompt will just work.
+        setCurrentRequestId(null);
+        setLastSeq(-1);
+        addMessage({
+          id: `sys_taskgone_${Date.now()}`,
+          type: "system",
+          content:
+            "Previous task ended (backend restarted or session expired). " +
+            "Send a new message to continue — your chat history is preserved.",
+          timestamp: Date.now(),
+        });
+      },
       onTaskStarted: (taskId: string) => {
         // Server echos the requestId we generated, but call this anyway
         // to keep client/server taskId in lock-step in case the backend
