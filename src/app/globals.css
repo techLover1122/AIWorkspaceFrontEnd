@@ -1391,43 +1391,20 @@ button {
   font-family: var(--font-orbitron, var(--font-mono));
   font-size: 13px;
   letter-spacing: 0.12em;
-  /* Claude.ai-style status shimmer: a moving gradient is clipped to the
-     text so a brighter highlight sweeps left→right across whatever word
-     the typewriter is showing. The base color is muted so the highlight
-     reads clearly. -webkit-background-clip is needed for Chromium-based
-     browsers; the plain `background-clip: text` covers Firefox 49+. */
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  background-image: linear-gradient(
-    90deg,
-    var(--vsc-text-muted) 0%,
-    var(--vsc-text-muted) 30%,
-    var(--vsc-text-emphasis) 45%,
-    #ffffff 50%,
-    var(--vsc-text-emphasis) 55%,
-    var(--vsc-text-muted) 70%,
-    var(--vsc-text-muted) 100%
-  );
-  background-size: 220% 100%;
-  background-repeat: no-repeat;
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: typingShimmer 2.4s linear infinite;
+  /* Solid violet that matches the MiniBot's purple palette (head
+   * gradient ends at #6D28D9, antenna bulb #c4b5fd). No shimmer
+   * gradient — the typewriter type-in/erase animation drives the
+   * motion now, and the static color keeps the visual coherent with
+   * the bot beside it. */
+  color: #c4b5fd;
 }
 .typing-indicator-text::after {
   content: "▍";
   margin-left: 3px;
-  /* The shimmer above paints text via background-clip, but the cursor
-     ::after isn't part of that text run — it needs its own solid fill
-     since -webkit-text-fill-color: transparent is inherited. */
   color: #a78bfa;
-  -webkit-text-fill-color: #a78bfa;
+  /* Blink in lockstep with the typewriter rhythm — same purple as the
+   * MiniBot antenna stem so the cursor reads as "part of the bot". */
   animation: botCursor 0.75s steps(1) infinite;
-}
-
-@keyframes typingShimmer {
-  0%   { background-position: 120% 0; }
-  100% { background-position: -20% 0; }
 }
 
 /* --- User message --- */
