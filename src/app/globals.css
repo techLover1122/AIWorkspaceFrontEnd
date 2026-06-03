@@ -1432,22 +1432,25 @@ button {
 
 /* --- User message --- */
 
+/* Each "turn" wraps one user prompt + the assistant content that
+ * answers it. The wrapper is the sticky scope for its .msg-user:
+ * sticky elements only stick within their own containing block, so
+ * each turn's user prompt sticks while you scroll through that
+ * turn's content, then naturally unsticks once the turn scrolls off.
+ * Two turns' user msgs can never stack on top of each other because
+ * they belong to different containing blocks. */
+.msg-turn {
+  position: relative;
+}
+
 .msg-user {
   padding: 6px 14px;
   display: flex;
-}
-
-/* Only the most-recent user message sticks to the top of the chat-list
- * scroll viewport, giving Claude.ai-style "current turn header" while
- * older user messages scroll normally. (Sticking ALL of them stacks
- * them at the top — the previous prompt shows through behind the
- * latest one because adjacent sticky siblings overlap rather than
- * push each other out.)
- *
- * Background must be opaque (matching the chat panel) so the AI's
- * reply below doesn't bleed through the sticky header. z-index keeps
- * it above message content but below modals / overlays. */
-.msg-user-latest {
+  /* Sticky-to-top within the parent .msg-turn — Claude.ai-style
+   * "current turn header" that progresses as you scroll. Background
+   * must be opaque (matching the chat panel) so the AI's reply below
+   * doesn't bleed through; z-index keeps it above message content
+   * but below modals / overlays. */
   position: sticky;
   top: 0;
   z-index: 5;
@@ -1553,6 +1556,50 @@ button {
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+  position: relative;
+}
+
+/* Collapsed long user prompts: clamp to 5 lines with a soft fade at
+ * the bottom so the user can tell there's more without it eating
+ * scroll real estate. The "Show more" button (.msg-user-expand) reveals
+ * the full text. line-clamp uses the -webkit-box layout that all
+ * modern browsers support. */
+.msg-user-text.collapsed {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  /* Visual hint that there's hidden content — soft fade on the last
+   * few lines into the card's background gradient. mask is widely
+   * supported in evergreen browsers. */
+  -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 70%, transparent 100%);
+}
+
+/* Show-more / show-less toggle. Always present but only visible on
+ * hover (or keyboard focus) so short prompts that don't trip the
+ * collapse threshold get no UI clutter, and long ones don't fight
+ * the prompt text for attention until the user reaches for them. */
+.msg-user-expand {
+  margin-top: 4px;
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--vsc-border);
+  color: var(--vsc-text-link);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.msg-user-card:hover .msg-user-expand,
+.msg-user-expand:focus-visible {
+  opacity: 1;
+}
+.msg-user-expand:hover {
+  background: rgba(55, 148, 255, 0.1);
+  border-color: rgba(55, 148, 255, 0.45);
 }
 
 /* Inline image attachments inside a user message — rendered as small

@@ -286,20 +286,57 @@ export function ChatMessages({
     );
   }
 
+  // Group messages into turns so each user prompt + the assistant's
+  // reply that follows it live in their own `.msg-turn` container.
+  // Each container is the sticky scope for its user message, which
+  // means as you scroll backwards through the chat, each turn's user
+  // prompt sticks to the top while you're reading that turn's content
+  // — then unsticks as the next turn enters view. (Without scoping,
+  // all sticky user msgs share the chat-list as their scope and stack
+  // on top of each other instead of replacing one another.)
+  const turns = groupIntoTurns(messages);
+
   return (
     <div ref={scrollRef} className="chat-list" role="log" aria-live="polite">
-      {messages.map((msg) => (
-        <Message
-          key={msg.id}
-          message={msg}
-          onReuse={onReuse}
-          showToolDetails={showToolDetails}
-          isLatestTodoWrite={msg.id === latestTodoWriteId}
-          isLatestUserMsg={msg.id === latestUserMsgId}
-        />
+      {turns.map((turn, turnIdx) => (
+        <div key={turn[0]?.id ?? turnIdx} className="msg-turn">
+          {turn.map((msg) => (
+            <Message
+              key={msg.id}
+              message={msg}
+              onReuse={onReuse}
+              showToolDetails={showToolDetails}
+              isLatestTodoWrite={msg.id === latestTodoWriteId}
+              isLatestUserMsg={msg.id === latestUserMsgId}
+            />
+          ))}
+        </div>
       ))}
     </div>
   );
+}
+
+/** Split a flat message list into turns. A turn starts at each user
+ *  message and runs until (but not including) the next one. Any
+ *  messages BEFORE the first user message (compact-summary system
+ *  messages, restored-history preamble) become a turn of their own at
+ *  the front so they render in document order without being silently
+ *  attached to turn 1's sticky scope. */
+function groupIntoTurns(messages: ChatMessage[]): ChatMessage[][] {
+  if (messages.length === 0) return [];
+  const turns: ChatMessage[][] = [];
+  let current: ChatMessage[] = [];
+  for (const msg of messages) {
+    const isUserMsg = msg.type === "chat" && msg.role === "user";
+    if (isUserMsg) {
+      if (current.length > 0) turns.push(current);
+      current = [msg];
+    } else {
+      current.push(msg);
+    }
+  }
+  if (current.length > 0) turns.push(current);
+  return turns;
 }
 
 type MessageProps = {
@@ -472,6 +509,12 @@ type UserMessageProps = {
 
 const UserMessage = memo(UserMessageImpl);
 
+// Long-prompt collapse threshold. We only collapse content that's
+// clearly verbose — short paragraphs stay fully visible. The number
+// is intentionally generous (a typical 1-3 sentence prompt clears
+// it) so the collapse doesn't kick in for normal questions.
+const USER_MSG_COLLAPSE_THRESHOLD = 280;
+
 function UserMessageImpl({
   messageId,
   content,
@@ -481,6 +524,9 @@ function UserMessageImpl({
 }: UserMessageProps) {
   const [copied, setCopied] = useState(false);
   const [zoomedUrl, setZoomedUrl] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const isLong = content.length > USER_MSG_COLLAPSE_THRESHOLD;
+  const showCollapsed = isLong && !expanded;
 
   const handleCopy = async () => {
     try {
@@ -583,7 +629,25 @@ function UserMessageImpl({
             </button>
           </span>
         </div>
-        {content && <div className="msg-user-text">{content}</div>}
+        {content && (
+          <>
+            <div
+              className={`msg-user-text${showCollapsed ? " collapsed" : ""}`}
+            >
+              {content}
+            </div>
+            {isLong && (
+              <button
+                type="button"
+                className="msg-user-expand"
+                onClick={() => setExpanded((e) => !e)}
+                aria-expanded={expanded}
+              >
+                {expanded ? "Show less" : "Show more"}
+              </button>
+            )}
+          </>
+        )}
         {imageUrls && imageUrls.length > 0 && (
           <div className="msg-user-images">
             {imageUrls.map((url, i) => (
