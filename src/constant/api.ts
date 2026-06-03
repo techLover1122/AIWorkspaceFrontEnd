@@ -110,6 +110,17 @@ export function eventsUrl(): string {
   return `${BACKEND_URL}/api/events`;
 }
 
+/**
+ * WebSocket URL for the PTY-backed terminal. We derive ws(s):// from the
+ * backend's http(s):// scheme so the same INSTANCE_IP / PLATFORM_DOMAIN
+ * routing applies — Traefik proxies the upgrade through transparently.
+ */
+export function terminalWsUrl(): string {
+  const u = new URL(BACKEND_URL);
+  const proto = u.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${u.host}/api/terminal`;
+}
+
 export function installPackUrl(): string {
   return `${BACKEND_URL}/api/packs/install`;
 }

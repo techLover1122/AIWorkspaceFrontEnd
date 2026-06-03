@@ -1,11 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { INSTANCE_IP, urlsUrl, urlByIdUrl } from "../../constant/api";
+
+// Sentinel URL recognized by preview-pane.tsx — when a tab opens this
+// URL it renders <TerminalView /> instead of an iframe.
+export const TERMINAL_VIEW_URL = "aiide://terminal";
 
 type NewTabPageProps = {
   codeServerUrl: string;
   onNavigate: (url: string, label: string) => void;
+};
+
+type PinnedTile = {
+  id: string;
+  label: string;
+  url: string;
+  icon: React.ReactNode;
 };
 
 type SavedUrl = {
@@ -102,34 +113,63 @@ export function NewTabPage({ codeServerUrl, onNavigate }: NewTabPageProps) {
     });
   }, []);
 
+  // Built-in tiles that always sit at the front of the grid — VS Code
+  // editor and an in-workspace terminal. They use the same tile look as
+  // saved bookmarks but have no delete button (built-in, can't be
+  // removed). codeServerUrl is captured so it stays correct when the
+  // workspace URL changes.
+  const pinnedTiles = useMemo<PinnedTile[]>(
+    () => [
+      {
+        id: "vscode",
+        label: "VS Code Editor",
+        url: codeServerUrl,
+        icon: (
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
+            <rect x="1" y="1" width="22" height="22" rx="5" fill="#007acc" />
+            <path
+              d="M6 7.5l6 4.5-6 4.5M13 16h5"
+              stroke="#fff"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ),
+      },
+      {
+        id: "terminal",
+        label: "Terminal",
+        url: TERMINAL_VIEW_URL,
+        icon: (
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
+            <rect
+              x="1.5"
+              y="3"
+              width="21"
+              height="18"
+              rx="3"
+              fill="#1c1c1c"
+              stroke="#3794ff"
+              strokeWidth="1.4"
+            />
+            <path
+              d="M5 9l3 3-3 3M10 15h5"
+              stroke="#73c991"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ),
+      },
+    ],
+    [codeServerUrl]
+  );
+
   return (
     <div className="ntp-root">
       <div className="ntp-inner">
-        {/* VS Code — primary large card */}
-        <button
-          type="button"
-          className="ntp-vscode-card"
-          onClick={() => onNavigate(codeServerUrl, "VS Code")}
-        >
-          <span className="ntp-vscode-icon">
-            <svg viewBox="0 0 24 24" width="36" height="36" fill="none">
-              <rect x="1" y="1" width="22" height="22" rx="5" fill="#007acc" />
-              <path
-                d="M6 7.5l6 4.5-6 4.5M13 16h5"
-                stroke="#fff"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-          <div className="ntp-vscode-info">
-            <span className="ntp-vscode-title">VS Code Editor</span>
-            <span className="ntp-vscode-url">{codeServerUrl}</span>
-          </div>
-          <span className="ntp-vscode-arrow">→</span>
-        </button>
-
         {/* URL add bar */}
         <div className="ntp-urlbar-wrap">
           <svg className="ntp-urlbar-icon" viewBox="0 0 16 16" fill="none">
@@ -184,71 +224,82 @@ export function NewTabPage({ codeServerUrl, onNavigate }: NewTabPageProps) {
           </button>
         </div>
 
-        {saved.length === 0 ? (
-          <div className="ntp-detected-empty">
-            {loading
-              ? "Loading…"
-              : "No saved URLs yet. Type a URL above and press Add."}
-          </div>
-        ) : (
-          <div className="ntp-grid">
-            {saved.map((u) => {
-              const displayName = u.name || hostFromUrl(u.url);
-              const showImg = u.icon && !iconErrors.has(u.id);
-              return (
-                <div
-                  key={u.id}
-                  className="ntp-card ntp-bookmark-card"
-                  onClick={() => onNavigate(u.url, displayName)}
-                  title={`${displayName}\n${u.url}`}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onNavigate(u.url, displayName);
-                    }
-                  }}
+        <div className="ntp-grid">
+          {pinnedTiles.map((tile) => (
+            <div
+              key={tile.id}
+              className="ntp-card ntp-bookmark-card ntp-pinned-card"
+              onClick={() => onNavigate(tile.url, tile.label)}
+              title={tile.label}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onNavigate(tile.url, tile.label);
+                }
+              }}
+            >
+              <span className="ntp-bookmark-icon">{tile.icon}</span>
+              <span className="ntp-bookmark-name">{tile.label}</span>
+            </div>
+          ))}
+          {saved.map((u) => {
+            const displayName = u.name || hostFromUrl(u.url);
+            const showImg = u.icon && !iconErrors.has(u.id);
+            return (
+              <div
+                key={u.id}
+                className="ntp-card ntp-bookmark-card"
+                onClick={() => onNavigate(u.url, displayName)}
+                title={`${displayName}\n${u.url}`}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onNavigate(u.url, displayName);
+                  }
+                }}
+              >
+                <button
+                  type="button"
+                  className="ntp-bookmark-delete"
+                  onClick={(e) => handleDelete(u.id, e)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  title="Remove"
+                  aria-label="Delete bookmark"
                 >
-                  <button
-                    type="button"
-                    className="ntp-bookmark-delete"
-                    onClick={(e) => handleDelete(u.id, e)}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    title="Remove"
-                    aria-label="Delete bookmark"
-                  >
-                    <svg viewBox="0 0 16 16" width="11" height="11" fill="none" aria-hidden>
-                      <path
-                        d="M4 4l8 8M12 4l-8 8"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </button>
-                  <span className="ntp-bookmark-icon">
-                    {showImg ? (
-                      <img
-                        src={u.icon!}
-                        alt=""
-                        width={32}
-                        height={32}
-                        loading="lazy"
-                        onError={() => onIconError(u.id)}
-                      />
-                    ) : (
-                      <span className="ntp-bookmark-letter" aria-hidden>
-                        {fallbackLetter(displayName)}
-                      </span>
-                    )}
-                  </span>
-                  <span className="ntp-bookmark-name">{displayName}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                  <svg viewBox="0 0 16 16" width="11" height="11" fill="none" aria-hidden>
+                    <path
+                      d="M4 4l8 8M12 4l-8 8"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+                <span className="ntp-bookmark-icon">
+                  {showImg ? (
+                    <img
+                      src={u.icon!}
+                      alt=""
+                      width={32}
+                      height={32}
+                      loading="lazy"
+                      onError={() => onIconError(u.id)}
+                    />
+                  ) : (
+                    <span className="ntp-bookmark-letter" aria-hidden>
+                      {fallbackLetter(displayName)}
+                    </span>
+                  )}
+                </span>
+                <span className="ntp-bookmark-name">{displayName}</span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

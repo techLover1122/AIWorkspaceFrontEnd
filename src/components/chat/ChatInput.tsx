@@ -431,17 +431,18 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             </button>
           </div>
 
-          {/* Right: tool-details toggle + mode + send */}
+          {/* Right: tool-details toggle + mode + send.
+              The eye toggle and mode chip stay enabled during a turn — they're
+              view-only preferences (show/hide tool blocks) and the next-turn
+              permission mode. Neither cancels or interferes with the in-flight
+              stream, so locking them out forced users to wait pointlessly. */}
           <div className="composer-toolbar-right">
             <button
               type="button"
               className={`tool-icon-btn${showToolDetails ? " active" : ""}`}
               onClick={onToggleToolDetails}
-              disabled={isLoading}
               title={
-                isLoading
-                  ? "Disabled while Claude is responding"
-                  : showToolDetails
+                showToolDetails
                   ? "Hide tool details (tool calls, results, thinking)"
                   : "Show tool details (tool calls, results, thinking)"
               }
@@ -455,12 +456,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               className="edit-mode-chip"
               data-mode={permissionMode}
               onClick={onToggleMode}
-              disabled={isLoading}
-              title={
-                isLoading
-                  ? "Disabled while Claude is responding"
-                  : "Toggle permission mode (Ctrl+Shift+M)"
-              }
+              title="Toggle permission mode (Ctrl+Shift+M)"
             >
               <IconCode />
               <span>{MODE_LABEL[permissionMode]}</span>

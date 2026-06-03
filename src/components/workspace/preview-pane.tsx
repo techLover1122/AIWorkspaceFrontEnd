@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { NewTabPage } from "./new-tab-page";
+import { NewTabPage, TERMINAL_VIEW_URL } from "./new-tab-page";
 import { PortsView } from "./PortsView";
+import { TerminalView } from "./TerminalView";
 import { useWorkspaceTab } from "../../contexts/WorkspaceTabContext";
 import type { EditorOverlayTool } from "./editor-overlay-toolbar";
 
@@ -162,6 +163,14 @@ export function PreviewPane({
             else onNavigate(tabId, u, label);
           }}
         />
+      </div>
+    );
+  }
+
+  if (url === TERMINAL_VIEW_URL) {
+    return (
+      <div className="preview-frame" style={hiddenStyle}>
+        <TerminalView />
       </div>
     );
   }

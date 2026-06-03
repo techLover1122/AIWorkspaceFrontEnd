@@ -984,7 +984,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
 
       {state.isLoading && (
         <div className="typing-bar">
-          <TypingIndicator />
+          <TypingIndicator messages={state.messages} />
         </div>
       )}
 

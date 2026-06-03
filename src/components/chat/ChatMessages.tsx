@@ -189,14 +189,11 @@ export function ChatMessages({
   const scrollRef = useRef<HTMLDivElement>(null);
   // Stick-to-bottom is the "follow streaming text down" mode — engaged
   // when the user is near the bottom, disengaged when they scroll up.
+  // Combined with CSS `position: sticky` on `.msg-user`, this gives
+  // the Claude.ai pattern: response auto-follows the bottom; once the
+  // user's prompt would scroll off the top, sticky glues it to the
+  // viewport top so it stays visible throughout the turn.
   const stickToBottomRef = useRef(true);
-  // Pin mode is the "Claude.ai cinema view" — engaged when the user
-  // hits send. Their message snaps to the top of the viewport and stays
-  // there while the response streams into the empty space below. Pin
-  // wins over stick-to-bottom while it's engaged. Released on the next
-  // real user scroll input (wheel / touch / arrow keys) so the user
-  // can always take manual control back.
-  const pinUserMsgRef = useRef(false);
   const lastUserMsgIdRef = useRef<string | null>(null);
 
   // Latest user msg + whether it's the very last message in the chat.
@@ -228,27 +225,11 @@ export function ChatMessages({
     return null;
   })();
 
-  // Release the pin on any real user input. We listen to wheel / touch /
-  // keydown rather than the generic "scroll" event so our own
-  // programmatic scrollIntoView calls don't accidentally release the pin.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const release = () => {
-      pinUserMsgRef.current = false;
-    };
-    el.addEventListener("wheel", release, { passive: true });
-    el.addEventListener("touchstart", release, { passive: true });
-    el.addEventListener("keydown", release);
-    return () => {
-      el.removeEventListener("wheel", release);
-      el.removeEventListener("touchstart", release);
-      el.removeEventListener("keydown", release);
-    };
-  }, []);
-
-  // Track whether the user is near the bottom — drives stick-to-bottom
-  // once the pin has been released.
+  // Track whether the user is near the bottom — drives stick-to-bottom.
+  // If they scroll up more than 80px from the bottom we stop following
+  // streaming chunks so they can read older content in peace. The CSS
+  // sticky on .msg-user makes sure their current prompt stays visible
+  // at the top of the viewport while they do that.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -261,39 +242,13 @@ export function ChatMessages({
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Cinema-view pin: when the user submits a new prompt, snap their
-  // message to the top of the viewport so the AI's reply streams into
-  // the empty space below (matching Claude.ai / ChatGPT). We also flip
-  // stick-to-bottom off so the bottom-follow effect doesn't immediately
-  // yank the camera down again on the next stream chunk.
-  //
-  // Effect declared BEFORE the bottom-follow effect on purpose: React
-  // fires effects in declaration order, so the pin is set before the
-  // follow-bottom check runs on the same render.
+  // Bottom-follow: when content changes (stream chunk, tool call), pull
+  // the viewport to the bottom if the user is near it. CSS `position:
+  // sticky` on `.msg-user` (in globals.css) handles the other half of
+  // the Claude.ai pattern — once the bottom-follow scrolls past the
+  // user's prompt, sticky glues the prompt to the top of the viewport
+  // so the user can always see what turn they're in.
   useEffect(() => {
-    if (!latestUserMsgId) return;
-    if (lastUserMsgIdRef.current === latestUserMsgId) return;
-    lastUserMsgIdRef.current = latestUserMsgId;
-    // Skip pinning for restored history — the reply is already present
-    // after this user msg, so the user wants the latest content, not a
-    // cinema replay of the previous turn.
-    if (!latestUserMsgIsLast) return;
-    pinUserMsgRef.current = true;
-    stickToBottomRef.current = false;
-    requestAnimationFrame(() => {
-      const node = document.querySelector(
-        `[data-msg-id="${CSS.escape(latestUserMsgId)}"]`
-      );
-      node?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }, [latestUserMsgId, latestUserMsgIsLast]);
-
-  // Stick-to-bottom: follow streaming content downward — but only when
-  // the cinema pin is released. While pinned, the user is reading from
-  // the top of their message; yanking the view to the bottom would
-  // defeat the whole point.
-  useEffect(() => {
-    if (pinUserMsgRef.current) return;
     if (!stickToBottomRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
@@ -301,6 +256,22 @@ export function ChatMessages({
       el.scrollTop = el.scrollHeight;
     });
   }, [messages]);
+
+  // On a new send (not a restore), force-re-engage stick and smooth-
+  // scroll to bottom — sending is a strong "I want to watch what
+  // happens next" signal.
+  useEffect(() => {
+    if (!latestUserMsgId) return;
+    if (lastUserMsgIdRef.current === latestUserMsgId) return;
+    lastUserMsgIdRef.current = latestUserMsgId;
+    if (!latestUserMsgIsLast) return; // skip restored history
+    stickToBottomRef.current = true;
+    const el = scrollRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    });
+  }, [latestUserMsgId, latestUserMsgIsLast]);
 
   if (messages.length === 0) {
     return (
