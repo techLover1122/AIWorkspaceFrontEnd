@@ -1395,7 +1395,7 @@ button {
     rgba(55, 148, 255, 0.07) 0%,
     rgba(55, 148, 255, 0.03) 100%
   );
-  border: 1px solid var(--vsc-border-strong);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
   padding: 8px 12px 10px;
   display: flex;

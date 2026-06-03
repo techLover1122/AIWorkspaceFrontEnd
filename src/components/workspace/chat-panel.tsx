@@ -161,6 +161,18 @@ function writePermissionMode(mode: PermissionMode): void {
   }
 }
 
+// Tool calls that mean "files on disk just changed" — used to decide
+// whether to auto-reload the active preview tab after a turn finishes.
+// Bash is intentionally NOT here: it would also fire for read-only
+// commands (ls, cat, grep) and reloads would feel random. The edit
+// tools below are a clean signal.
+const FILE_EDIT_TOOLS = new Set([
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+]);
+
 type ChatPanelProps = {
   workingDirectory?: string;
   onChangeProject?: (path: string) => void;
@@ -238,6 +250,11 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   // we make below don't re-trigger the effect, and by the empty-chat
   // check so we never yank a user out of a chat they're already in.
   const restoredForRef = useRef<string | null>(null);
+
+  // Index into state.messages where the current turn began (the user
+  // message we're about to push). onDone reads it to scan only THIS
+  // turn's tool calls — not historical ones from earlier in the chat.
+  const turnStartIndexRef = useRef(0);
   useEffect(() => {
     if (!isConnected || !workingDirectory) return;
     if (restoredForRef.current === workingDirectory) return;
@@ -346,6 +363,23 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       onDone: () => {
         setLoading(false);
         setCurrentRequestId(null);
+        // If the model touched files in this turn, soft-reload the
+        // active tab so the user sees the change without clicking the
+        // toolbar reload button. Dev servers usually HMR themselves,
+        // but config edits, new files in static apps, and broken-HMR
+        // states don't — this catches those without being noisy on
+        // turns that only read code.
+        const msgs = stateRef.current.messages;
+        const start = Math.max(0, turnStartIndexRef.current);
+        let didEdit = false;
+        for (let i = start; i < msgs.length; i++) {
+          const m = msgs[i];
+          if (m.type === "tool" && m.toolName && FILE_EDIT_TOOLS.has(m.toolName)) {
+            didEdit = true;
+            break;
+          }
+        }
+        if (didEdit) tabCtx?.reloadActiveTab();
       },
       onError: (error: string) => {
         addMessage({
@@ -358,7 +392,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         setCurrentRequestId(null);
       },
     }),
-    [addMessage, appendToLastMessage, finalizeLastMessage, setSessionId, setLoading, setCurrentRequestId, state.currentRequestId, abort]
+    [addMessage, appendToLastMessage, finalizeLastMessage, setSessionId, setLoading, setCurrentRequestId, state.currentRequestId, abort, stateRef, tabCtx]
   );
 
   const fetchAndShowPorts = useCallback(async () => {
@@ -435,6 +469,11 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       const imagePreviewUrls = imageAttachments
         .map((a) => a.preview)
         .filter((p): p is string => !!p);
+      // Snapshot the message count BEFORE appending the user msg so the
+      // onDone scan starts at this turn's user message and skips every
+      // prior tool call. (length-based, not id-based, so it works even
+      // after a /clear or history restore.)
+      turnStartIndexRef.current = stateRef.current.messages.length;
       addMessage(createUserMessage(composed, imagePreviewUrls));
 
       setCurrentRequestId(requestId);

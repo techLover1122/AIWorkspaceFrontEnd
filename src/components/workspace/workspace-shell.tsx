@@ -717,7 +717,7 @@ export function WorkspaceShell({
   }, []);
 
   return (
-    <WorkspaceTabContext.Provider value={{ openTab: handleOpenTab }}>
+    <WorkspaceTabContext.Provider value={{ openTab: handleOpenTab, reloadActiveTab: handleActiveTabReload }}>
     <main className="app-shell">
       <section className="workspace-frame">
         <section
