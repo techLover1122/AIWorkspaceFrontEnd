@@ -89,6 +89,88 @@ function OpenTabChips({ content, autoOpen }: { content: string; autoOpen?: boole
   );
 }
 
+/* ------------------------------------------------------------------
+ * TodoWrite live progress card
+ *
+ * The model uses TodoWrite to track multi-step plans (e.g. "1. add
+ * route, 2. add handler, 3. run tests"). Previously these calls were
+ * collapsed behind the eye-icon tool details toggle, so the user had
+ * no idea which step was in flight. Now we render the latest snapshot
+ * as a structured card that's always visible — completed steps get a
+ * check, the in-progress step gets a spinner glyph + its activeForm
+ * label ("Running tests"), and pending steps show as outlines.
+ * ------------------------------------------------------------------ */
+type TodoItem = {
+  content: string;
+  activeForm: string;
+  status: "pending" | "in_progress" | "completed";
+};
+
+function extractTodos(
+  input: Record<string, unknown> | undefined
+): TodoItem[] | null {
+  const todos = input?.todos;
+  if (!Array.isArray(todos)) return null;
+  const valid = todos.filter((t): t is TodoItem => {
+    if (!t || typeof t !== "object") return false;
+    const obj = t as Record<string, unknown>;
+    if (typeof obj.content !== "string") return false;
+    if (typeof obj.activeForm !== "string") return false;
+    return (
+      obj.status === "pending" ||
+      obj.status === "in_progress" ||
+      obj.status === "completed"
+    );
+  });
+  return valid.length > 0 ? valid : null;
+}
+
+function TodoListCard({ todos }: { todos: TodoItem[] }) {
+  const completed = todos.filter((t) => t.status === "completed").length;
+  const total = todos.length;
+  const active = todos.find((t) => t.status === "in_progress");
+  const allDone = completed === total;
+  const headerLabel = allDone
+    ? "All tasks complete"
+    : active
+    ? active.activeForm
+    : "Plan";
+
+  return (
+    <div
+      className={`msg-todo-card${allDone ? " all-done" : ""}`}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="msg-todo-header">
+        <span className="msg-todo-glyph" aria-hidden>
+          {allDone ? "✓" : active ? "◐" : "▸"}
+        </span>
+        <span className="msg-todo-title">{headerLabel}</span>
+        <span className="msg-todo-progress" aria-label={`${completed} of ${total} complete`}>
+          {completed} / {total}
+        </span>
+      </div>
+      <ul className="msg-todo-list">
+        {todos.map((t, i) => (
+          <li key={i} className={`msg-todo-item status-${t.status}`}>
+            <span className="msg-todo-status" aria-hidden>
+              {t.status === "completed"
+                ? "✓"
+                : t.status === "in_progress"
+                ? "◐"
+                : "○"}
+            </span>
+            <span className="msg-todo-text">
+              {t.status === "in_progress" ? t.activeForm : t.content}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 type ChatMessagesProps = {
   messages: ChatMessage[];
   /** Push a previous user message back into the composer for editing/resending. */
@@ -104,14 +186,13 @@ export function ChatMessages({
   onReuse,
   showToolDetails = false,
 }: ChatMessagesProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const lastScrolledUserIdRef = useRef<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const lastUserMsgIdRef = useRef<string | null>(null);
 
-  // Anchor the latest user message to the top of the scroll viewport whenever
-  // the user submits a new message. We deliberately do NOT scroll while the
-  // assistant streams its reply — that lets the user message stay pinned at
-  // the top, matching the Claude.ai / ChatGPT reading pattern instead of the
-  // old "always glued to the bottom" behavior.
+  // Find the latest user-submitted message id — used to force a snap-to-bottom
+  // when the user hits send (so even if they had scrolled up earlier, sending
+  // a new prompt always brings them back to follow the response).
   const latestUserMsgId = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -120,40 +201,85 @@ export function ChatMessages({
     return null;
   })();
 
+  // Find the most recent TodoWrite call. The model often calls TodoWrite
+  // many times to update step status — we only render the latest as the
+  // live progress card. Older snapshots stay hidden unless the user
+  // explicitly turns on tool details to replay how the plan evolved.
+  const latestTodoWriteId = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.type === "tool" && m.toolName === "TodoWrite") return m.id;
+    }
+    return null;
+  })();
+
+  // Watch the scroll container: if the user scrolls more than ~80px above
+  // the bottom, we stop auto-following. The moment they scroll back near
+  // the bottom, we re-enable it. This is the standard chat UX — live
+  // updates pull you down, but reading older content stays put.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const STICK_THRESHOLD = 80;
+    const onScroll = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = distance < STICK_THRESHOLD;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Auto-follow the bottom whenever messages change (streaming chunks,
+  // tool calls, etc.) — but only if the user hasn't scrolled away.
+  // Deferred to rAF so the new content is laid out before we measure.
+  useEffect(() => {
+    if (!stickToBottomRef.current) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [messages]);
+
+  // On a new user message, force-re-engage stick and snap to bottom.
+  // Sending a prompt is a strong signal the user wants to watch what
+  // happens next.
   useEffect(() => {
     if (!latestUserMsgId) return;
-    if (lastScrolledUserIdRef.current === latestUserMsgId) return;
-    lastScrolledUserIdRef.current = latestUserMsgId;
-    // Defer to next frame so the new <UserMessage> is mounted before we
-    // try to scroll to it.
+    if (lastUserMsgIdRef.current === latestUserMsgId) return;
+    lastUserMsgIdRef.current = latestUserMsgId;
+    stickToBottomRef.current = true;
+    const el = scrollRef.current;
+    if (!el) return;
     requestAnimationFrame(() => {
-      const el = document.querySelector(
-        `[data-msg-id="${CSS.escape(latestUserMsgId)}"]`
-      );
-      el?.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     });
   }, [latestUserMsgId]);
 
   if (messages.length === 0) {
     return (
-      <div className="chat-list chat-list-empty" role="log" aria-live="polite">
+      <div
+        ref={scrollRef}
+        className="chat-list chat-list-empty"
+        role="log"
+        aria-live="polite"
+      >
         <AnimatedAIBot />
-        <div ref={bottomRef} />
       </div>
     );
   }
 
   return (
-    <div className="chat-list" role="log" aria-live="polite">
+    <div ref={scrollRef} className="chat-list" role="log" aria-live="polite">
       {messages.map((msg) => (
         <Message
           key={msg.id}
           message={msg}
           onReuse={onReuse}
           showToolDetails={showToolDetails}
+          isLatestTodoWrite={msg.id === latestTodoWriteId}
         />
       ))}
-      <div ref={bottomRef} />
     </div>
   );
 }
@@ -162,6 +288,10 @@ type MessageProps = {
   message: ChatMessage;
   onReuse?: (text: string) => void;
   showToolDetails: boolean;
+  /** True for the most-recent TodoWrite call. Only the latest snapshot
+   *  renders as the live plan card; older ones stay hidden unless the
+   *  user opts into showToolDetails. */
+  isLatestTodoWrite?: boolean;
 };
 
 /**
@@ -181,7 +311,21 @@ function MessageImpl({
   message,
   onReuse,
   showToolDetails,
+  isLatestTodoWrite,
 }: MessageProps) {
+  // TodoWrite gets its own structured live card so the user can always
+  // see "what step the AI is on" — this is the single most-asked-about
+  // piece of state during multi-step prompts. We only render the LATEST
+  // TodoWrite as the card (older ones would just be stale plans). With
+  // showToolDetails ON, older TodoWrite calls render too so you can
+  // replay how the plan evolved over the turn.
+  if (message.type === "tool" && message.toolName === "TodoWrite") {
+    const todos = extractTodos(message.toolInput);
+    if (!todos) return null;
+    if (!showToolDetails && !isLatestTodoWrite) return null;
+    return <TodoListCard todos={todos} />;
+  }
+
   // Internal AI traces — only shown when the user explicitly enables the
   // detail view from the composer. Default is hidden so the chat reads like
   // a normal conversation instead of dumping TodoWrite/tool JSON in-line.

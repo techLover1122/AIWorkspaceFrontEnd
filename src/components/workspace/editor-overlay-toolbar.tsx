@@ -46,7 +46,7 @@ type EditorOverlayToolbarProps = {
  * Floating toolbar that sits under the editor tabs. Two render modes:
  *
  *   visible=true → full strip:
- *     [🔄 refresh]  [✏️ marker]  [💬 comments]  [↗ discard]  [Send]  [⟩ hide]
+ *     [🔄 refresh]  [✏️ marker]  [💬 comments]  [✕ discard]  [Send]  [⟩ hide]
  *                     ↑              ↑              ↑          ↑
  *                     only when      only when      only when  only when
  *                     showAnnotation showAnnotation hasSnapshot hasSnapshot
@@ -145,7 +145,7 @@ export function EditorOverlayToolbar({
 
           {/* Discard snapshot + Send appear only after a snapshot is
               captured. Snapshot lifecycle: marker / comments click
-              triggers capture; discard arrow or Send clears it. */}
+              triggers capture; discard X or Send clears it. */}
           {hasSnapshot && (
             <>
               <div className="overlay-toolbar-divider" aria-hidden />
@@ -156,7 +156,7 @@ export function EditorOverlayToolbar({
                 title="Discard snapshot and annotations"
                 aria-label="Discard snapshot and annotations"
               >
-                <IconChevronRight />
+                <IconCross />
               </button>
               <div className="overlay-toolbar-divider" aria-hidden />
               <button
@@ -233,6 +233,19 @@ function IconChevronLeft() {
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconCross() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M4 4l8 8M12 4l-8 8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
       />
     </svg>
   );

@@ -122,6 +122,45 @@ function normalizeCwd(p: string): string {
   return p.toLowerCase().replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
+/* ------------------------------------------------------------------
+ * Permission mode persistence
+ *
+ * The user explicitly asked to stop being prompted "Allow / Allow"
+ * for every tool — they want it to just always allow. We default new
+ * sessions to "bypassPermissions" and remember whatever mode they
+ * pick from the toggle so a refresh doesn't snap them back to a
+ * prompting mode.
+ * ------------------------------------------------------------------ */
+const PERMISSION_MODE_KEY = "ai-ide:permission-mode";
+const VALID_MODES: readonly PermissionMode[] = [
+  "default",
+  "plan",
+  "acceptEdits",
+  "bypassPermissions",
+];
+
+function loadPermissionMode(): PermissionMode {
+  if (typeof window === "undefined") return "bypassPermissions";
+  try {
+    const raw = window.localStorage.getItem(PERMISSION_MODE_KEY);
+    if (raw && (VALID_MODES as readonly string[]).includes(raw)) {
+      return raw as PermissionMode;
+    }
+  } catch {
+    // fall through to default
+  }
+  return "bypassPermissions";
+}
+
+function writePermissionMode(mode: PermissionMode): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PERMISSION_MODE_KEY, mode);
+  } catch {
+    // quota / disabled — ignore
+  }
+}
+
 type ChatPanelProps = {
   workingDirectory?: string;
   onChangeProject?: (path: string) => void;
@@ -146,7 +185,15 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   } = useChatState();
   const { send, abort } = useClaudeStreaming();
 
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
+  // Default to bypassPermissions so the user isn't prompted "Allow / Allow"
+  // for every tool call. Whatever mode they switch to via the toggle is
+  // persisted, so refreshes keep their preference.
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(
+    loadPermissionMode
+  );
+  useEffect(() => {
+    writePermissionMode(permissionMode);
+  }, [permissionMode]);
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const [planRequest, setPlanRequest] = useState<PermissionRequest | null>(null);
   const [showHistory, setShowHistory] = useState(false);
