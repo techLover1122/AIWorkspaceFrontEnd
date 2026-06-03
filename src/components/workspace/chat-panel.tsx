@@ -648,36 +648,6 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
           )}
         </span>
         <span className="chat-panel-actions">
-          {isConnected && connection.status === "connected" && (() => {
-            // Informational chip only — shows WHICH auth method is currently
-            // connected (masked API key, or "Claude.ai" for a subscription).
-            // The actual logout action lives behind the `/logout` slash
-            // command in the composer below; no × button on the chip itself.
-            //
-            // Re-checking status inside the IIFE so TypeScript narrows
-            // `connection` to the "connected" variant within this scope —
-            // discriminated-union narrowing doesn't carry across the arrow
-            // function boundary from the outer && chain.
-            if (connection.status !== "connected") return null;
-            const authMethod = connection.authMethod;
-            const apiKeyMasked = connection.apiKeyMasked;
-
-            const isApiKey = authMethod === "api_key" && !!apiKeyMasked;
-            const isSubscription = authMethod === "subscription";
-            if (!isApiKey && !isSubscription) return null;
-
-            const label = isApiKey ? apiKeyMasked : "Claude.ai";
-            const chipTitle = isApiKey
-              ? "Connected via Anthropic API key — type /logout to sign out"
-              : "Connected via Claude.ai subscription — type /logout to sign out";
-
-            return (
-              <span className="chat-auth-chip" title={chipTitle}>
-                <span className="chat-auth-chip-dot" aria-hidden />
-                <span className="chat-auth-chip-label">{label}</span>
-              </span>
-            );
-          })()}
           {onChangeProject && (
             <button
               type="button"
