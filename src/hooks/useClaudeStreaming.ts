@@ -87,25 +87,76 @@ export function useClaudeStreaming() {
   }, []);
 
   /**
-   * POST /api/chat → receive { taskId }. Returns null on connection
-   * failure so the caller can retry without surfacing a fatal error.
+   * POST /api/chat → receive { taskId }. Returns either { taskId } on
+   * success or { error: <human-readable diagnostic> } on failure — the
+   * old shape was `string | null` which threw away the actual reason,
+   * leaving the user to guess at "Failed to start chat task" without
+   * any actionable info. Now the chat panel can surface what really
+   * went wrong (DNS, HTTP status, JSON shape, etc.).
    */
   const startTask = useCallback(
-    async (request: ChatRequest): Promise<string | null> => {
+    async (
+      request: ChatRequest
+    ): Promise<{ taskId: string } | { error: string }> => {
+      let res: Response;
       try {
-        const res = await fetch(chatUrl(), {
+        res = await fetch(chatUrl(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(request),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        const data = (await res.json()) as { taskId?: string };
-        return data.taskId ?? null;
       } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         // eslint-disable-next-line no-console
-        console.warn("[startTask] failed:", err);
-        return null;
+        console.warn("[startTask] fetch threw:", err);
+        return {
+          error:
+            `Couldn't reach the backend (${msg}). ` +
+            `Check that ai-ide-backend systemd service is running on the workspace: ` +
+            `\`sudo systemctl status ai-ide-backend\`.`,
+        };
       }
+      if (!res.ok) {
+        let bodySnippet = "";
+        try {
+          const text = await res.text();
+          bodySnippet = text.slice(0, 200);
+        } catch {
+          /* ignore body read failure */
+        }
+        // eslint-disable-next-line no-console
+        console.warn("[startTask] HTTP not-OK:", {
+          status: res.status,
+          statusText: res.statusText,
+          body: bodySnippet,
+        });
+        return {
+          error:
+            `Backend rejected the chat request: HTTP ${res.status} ${res.statusText}. ` +
+            (bodySnippet ? `Response: ${bodySnippet}` : "") +
+            ` Check \`sudo journalctl -u ai-ide-backend -n 100\` for the cause.`,
+        };
+      }
+      let data: { taskId?: string };
+      try {
+        data = (await res.json()) as { taskId?: string };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // eslint-disable-next-line no-console
+        console.warn("[startTask] body parse failed:", err);
+        return {
+          error: `Backend returned an unparseable response (${msg}).`,
+        };
+      }
+      if (!data.taskId) {
+        // eslint-disable-next-line no-console
+        console.warn("[startTask] response missing taskId:", data);
+        return {
+          error:
+            `Backend response had no taskId field. Got: ${JSON.stringify(data).slice(0, 200)}`,
+        };
+      }
+      return { taskId: data.taskId };
     },
     []
   );
@@ -299,13 +350,19 @@ export function useClaudeStreaming() {
    */
   const send = useCallback(
     async (request: ChatRequest, callbacks: StreamingCallbacks) => {
-      const taskId = await startTask(request);
-      if (!taskId) {
-        callbacks.onError("Failed to start chat task on the server.");
+      const started = await startTask(request);
+      if ("error" in started) {
+        // Surface the SPECIFIC failure reason (network, HTTP status,
+        // unparseable body, missing taskId) instead of the old generic
+        // "Failed to start chat task on the server" — that was useless
+        // when the user was hitting the error repeatedly and couldn't
+        // tell whether the backend was down, mis-routed, or returning
+        // a malformed response.
+        callbacks.onError(started.error);
         return;
       }
-      callbacks.onTaskStarted?.(taskId);
-      await attachToTask(taskId, 0, request, callbacks);
+      callbacks.onTaskStarted?.(started.taskId);
+      await attachToTask(started.taskId, 0, request, callbacks);
     },
     [startTask, attachToTask]
   );

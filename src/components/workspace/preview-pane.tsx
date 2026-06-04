@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NewTabPage, TERMINAL_VIEW_URL } from "./new-tab-page";
 import { PortsView } from "./PortsView";
 import { TerminalView } from "./TerminalView";
+import { BlockedServicePanel } from "./blocked-service-panel";
 import { useWorkspaceTab } from "../../contexts/WorkspaceTabContext";
+import {
+  checkIframeCompat,
+  openInBrowserTab,
+  openManagedPopup,
+} from "../../utils/iframeCompat";
 import type { EditorOverlayTool } from "./editor-overlay-toolbar";
 
 export type DrawingPoint = { x: number; y: number };
@@ -143,6 +149,13 @@ export function PreviewPane({
     });
   });
 
+  // Iframe-compat check. MUST sit before the early returns so the hook
+  // count stays stable across url-state transitions (empty → ports →
+  // terminal → http) — React enforces same-order hook calls per render.
+  // checkIframeCompat is a pure URL match against a small registry; the
+  // useMemo just dedupes work on re-renders where url didn't change.
+  const compat = useMemo(() => checkIframeCompat(url), [url]);
+
   if (!url) {
     return (
       <div className="preview-frame" style={hiddenStyle}>
@@ -171,6 +184,20 @@ export function PreviewPane({
     return (
       <div className="preview-frame" style={hiddenStyle}>
         <TerminalView />
+      </div>
+    );
+  }
+
+  // Known-blocked-host check (compat memoised above with the other
+  // hooks). Services like Stripe Checkout, OAuth providers, banks,
+  // etc. refuse iframe embedding via X-Frame-Options or CSP
+  // frame-ancestors. Render the BlockedServicePanel instead of the
+  // iframe — the panel gives the user one-click "open externally"
+  // options without their workspace ever unloading.
+  if (compat.blocked) {
+    return (
+      <div className="preview-frame" style={hiddenStyle}>
+        <BlockedServicePanel url={url} info={compat} />
       </div>
     );
   }
@@ -204,6 +231,69 @@ export function PreviewPane({
           // behind the static image.
           style={snapshot ? { visibility: "hidden" } : undefined}
         />
+
+        {/*
+          Escape-hatch overlay: every iframe gets a tiny "open externally"
+          button so the user can pop the URL into a window/tab if the
+          embedded view turns out to be blocked / broken / blank. Hidden
+          while a snapshot is being annotated (the user isn't trying to
+          navigate then). The known-blocked registry handles the common
+          cases up-front; this button is the catch-all for everything
+          else (custom paywalls, frame-buster JS, etc.).
+        */}
+        {!snapshot && (
+          <div className="preview-open-externally" aria-hidden={false}>
+            <button
+              type="button"
+              className="preview-open-externally-btn"
+              onClick={() => openManagedPopup(url)}
+              title="Open in a workspace popup window"
+              aria-label="Open in workspace popup"
+            >
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" aria-hidden>
+                <rect
+                  x="2"
+                  y="3"
+                  width="12"
+                  height="10"
+                  rx="1.5"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="M2 6h12"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="preview-open-externally-btn"
+              onClick={() => openInBrowserTab(url)}
+              title="Open in a new browser tab"
+              aria-label="Open in new browser tab"
+            >
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" aria-hidden>
+                <path
+                  d="M10 3h3v3M13 3l-6 6"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M6.5 4H4a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V9.5"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        )}
 
         {snapshot && (
           <img

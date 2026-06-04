@@ -632,6 +632,147 @@ button {
   background: #ffffff;
 }
 
+/* ── "Open externally" overlay buttons ─────────────────────────────
+ *
+ * Lives on EVERY iframe-rendering tab (not just known-blocked ones).
+ * The known-blocked-host registry handles services we already know
+ * refuse iframe embedding; this overlay is the catch-all escape hatch
+ * for anything we couldn't pre-detect — frame-buster JS, paywalls,
+ * services whose embedding policy changed since we last updated the
+ * registry, etc. Two tiny buttons in the bottom-right so they don't
+ * overlap the top-right reload button or annotation toolbar.
+ * Pointer-events isolated to each button so the iframe stays clickable
+ * everywhere else. */
+.preview-open-externally {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 4px;
+  z-index: 6; /* above iframe, below annotation overlays */
+  opacity: 0.35;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.preview-content:hover .preview-open-externally {
+  opacity: 1;
+}
+.preview-open-externally-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(20, 22, 26, 0.85);
+  color: #f3f4f6;
+  cursor: pointer;
+  pointer-events: auto;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.preview-open-externally-btn:hover {
+  background: rgba(55, 148, 255, 0.28);
+  border-color: rgba(55, 148, 255, 0.55);
+}
+
+/* ── BlockedServicePanel ──────────────────────────────────────────
+ *
+ * Renders in place of the iframe when the URL hits the known-blocked
+ * registry (Stripe Checkout, OAuth providers, banks, etc.). Centred
+ * card with the two "open externally" buttons + a one-line reason. */
+.blocked-service-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 32px;
+  text-align: center;
+  background: linear-gradient(
+    180deg,
+    rgba(55, 148, 255, 0.04) 0%,
+    rgba(20, 22, 26, 0) 80%
+  );
+  color: var(--vsc-text-emphasis);
+}
+.blocked-service-icon {
+  color: rgba(55, 148, 255, 0.7);
+  margin-bottom: 16px;
+}
+.blocked-service-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: var(--vsc-text-emphasis);
+}
+.blocked-service-reason {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 480px;
+  color: var(--vsc-text-muted, rgba(255, 255, 255, 0.7));
+  margin: 0 0 16px 0;
+}
+.blocked-service-url {
+  font-size: 11px;
+  font-family: var(--vsc-font-mono, ui-monospace, "Cascadia Code", monospace);
+  color: var(--vsc-text-muted, rgba(255, 255, 255, 0.5));
+  max-width: 480px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 24px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.blocked-service-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.blocked-service-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--vsc-text-emphasis);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.blocked-service-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.blocked-service-btn.primary {
+  background:
+    linear-gradient(rgba(55, 148, 255, 0.22), rgba(55, 148, 255, 0.22)),
+    var(--vsc-panel);
+  border-color: rgba(55, 148, 255, 0.6);
+  color: #fff;
+}
+.blocked-service-btn.primary:hover {
+  background:
+    linear-gradient(rgba(55, 148, 255, 0.32), rgba(55, 148, 255, 0.32)),
+    var(--vsc-panel);
+  border-color: rgba(55, 148, 255, 0.8);
+}
+.blocked-service-hint {
+  font-size: 11px;
+  color: var(--vsc-text-muted, rgba(255, 255, 255, 0.45));
+  max-width: 420px;
+  line-height: 1.5;
+}
+
 /* Floating reload button — always visible on every preview tab (hidden
    during the snapshot/annotate flow so it doesn't overlap the frozen
    image). Sits above the annotations SVG (z 10) so it stays clickable. */
@@ -1613,9 +1754,15 @@ button {
   opacity: 1;
   pointer-events: auto;
 }
+/* Hover background uses a stacked gradient + panel color so it stays
+ * fully OPAQUE even when sitting over the soft fade at the bottom of
+ * a clamped prompt. Plain `rgba(55, 148, 255, 0.1)` showed text
+ * bleeding through — user explicitly flagged that. */
 .msg-user-expand:hover {
-  background: rgba(55, 148, 255, 0.1);
-  border-color: rgba(55, 148, 255, 0.45);
+  background:
+    linear-gradient(rgba(55, 148, 255, 0.18), rgba(55, 148, 255, 0.18)),
+    var(--vsc-panel);
+  border-color: rgba(55, 148, 255, 0.55);
 }
 
 /* Inline image attachments inside a user message — rendered as small
