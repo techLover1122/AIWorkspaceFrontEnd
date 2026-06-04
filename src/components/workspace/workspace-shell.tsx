@@ -234,9 +234,10 @@ export function WorkspaceShell({
 
   // Called when the overlay toolbar expands from its collapsed handle —
   // capture the active tab's currently-rendered pixels, freeze as a static
-  // overlay, and arm the marker tool. In Electron mode capture is a single
-  // IPC call to webContents.capturePage() (no user permission prompt). In
-  // the browser fallback it uses getDisplayMedia (user picks the surface).
+  // overlay, and arm the marker tool. Capture is a single IPC call to the
+  // main process, which runs webContents.capturePage() on the tab's
+  // WebContentsView — no permission prompt, no surface picker. The capture
+  // path throws when running outside Electron (e.g. plain `npm run dev`).
   // Collapse / Send exits snapshot mode and restores the live content.
   const handleToolbarExpand = useCallback(async () => {
     const targetId = activeTabId;
@@ -400,6 +401,16 @@ export function WorkspaceShell({
       handleTabLoadingChange(tabId, loading);
     });
   }, [handleTabLoadingChange]);
+
+  // ── Active-tab sync (Phase 5) ─────────────────────────────────────────
+  // The renderer is the sole authority for which tab is active. Push every
+  // change to main so MCP-side callers (and `tab:list`) can read it without
+  // scraping the shell's DOM. No-op outside Electron.
+  useEffect(() => {
+    const electron = getElectronTabs();
+    if (!electron) return;
+    electron.setActive(activeTabId).catch(() => {});
+  }, [activeTabId]);
 
   // ── Bounds contract (Electron mode) ─────────────────────────────────
   // The WebContentsView for the active tab is positioned by the main

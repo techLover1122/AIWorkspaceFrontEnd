@@ -20,6 +20,11 @@ export type ElectronTabs = {
   capture: (
     tabId: string
   ) => Promise<{ dataUrl: string; width: number; height: number }>;
+  setActive: (tabId: string | null) => Promise<void>;
+  list: () => Promise<{
+    tabs: Array<{ tabId: string; url: string; visible: boolean; bounds: TabRect | null }>;
+    activeTabId: string | null;
+  }>;
   onLoadingChange: (cb: (tabId: string, loading: boolean) => void) => () => void;
   onTitleChange: (cb: (tabId: string, title: string) => void) => () => void;
   onUrlChange: (cb: (tabId: string, url: string) => void) => () => void;
