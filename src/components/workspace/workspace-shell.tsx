@@ -797,6 +797,24 @@ export function WorkspaceShell({
           style={{ gridTemplateColumns: `minmax(0, 1fr) 4px ${chatWidth}px` }}
         >
           <section className="editor">
+            {/* Phase 1 change: toolbar sits ABOVE the tab strip as part of
+                the chrome. With WebContentsView tabs, anything floating over
+                the content area gets occluded by the view (composited above
+                the renderer), so floating-over-iframe positioning no longer
+                works. Putting the toolbar in chrome keeps it visible. */}
+            {activeTab.url && !isCapturing && (
+              <EditorOverlayToolbar
+                visible={toolbarVisible}
+                onToggleVisible={toggleToolbarVisible}
+                activeTool={activeTool}
+                onChangeTool={handleChangeTool}
+                onReload={handleActiveTabReload}
+                showAnnotationTools={!!activeTab.url}
+                onCollapse={handleToolbarCollapse}
+                onSend={handleToolbarSend}
+                hasSnapshot={!!snapshotByTab[activeTab.id]}
+              />
+            )}
             <EditorTabs
               tabs={tabs}
               activeTabId={activeTabId}
@@ -812,29 +830,6 @@ export function WorkspaceShell({
               onGroupToggle={handleGroupToggle}
               onGroupRename={handleGroupRename}
               />
-            {/* Toolbar visibility rules:
-                - Any tab with a URL → render the toolbar (so refresh,
-                  marker, and comments are reachable for code-server,
-                  dev-previews, external sites — anything iframe-based).
-                - The blank "new tab" page (no URL) gets no toolbar.
-                - Hidden entirely during screenshot capture so the
-                  toolbar itself doesn't end up in the captured PNG.
-                - handleChangeTool auto-captures a snapshot when marker
-                  / comments is first armed, so users don't need to find
-                  a separate "capture" button. */}
-            {activeTab.url && !isCapturing && (
-              <EditorOverlayToolbar
-                visible={toolbarVisible}
-                onToggleVisible={toggleToolbarVisible}
-                activeTool={activeTool}
-                onChangeTool={handleChangeTool}
-                onReload={handleActiveTabReload}
-                showAnnotationTools={!!activeTab.url}
-                onCollapse={handleToolbarCollapse}
-                onSend={handleToolbarSend}
-                hasSnapshot={!!snapshotByTab[activeTab.id]}
-              />
-            )}
             <div className="editor-body" ref={editorBodyRef}>
               {/* Render every tab simultaneously and hide non-active ones via
                   `display:none` (handled inside PreviewPane). Keeps iframes
