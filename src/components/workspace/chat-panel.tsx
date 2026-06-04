@@ -393,6 +393,47 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
     }
   }, [state.currentRequestId, abort, setLoading, setCurrentRequestId]);
 
+  /**
+   * Pull the SDK's on-disk transcript for a session and replace the
+   * chat panel's messages with it. Used as the recovery path when the
+   * in-memory TaskRegistry has lost a task (backend was restarted, the
+   * workspace machine was powered off overnight, 30-min idle TTL fired)
+   * but the SDK already wrote the conversation to
+   * `~/.claude/projects/<encoded>/<sessionId>.jsonl`. The user gets to
+   * see exactly what happened during the unattended run instead of a
+   * dead 404 + blank chat.
+   *
+   * Returns true on success, false if the transcript couldn't be
+   * fetched (project not found, transcript missing, network blip).
+   */
+  const restoreFromDisk = useCallback(
+    async (sessionId: string): Promise<boolean> => {
+      if (!sessionId || !workingDirectory) return false;
+      try {
+        const projRes = await fetch(projectsUrl());
+        if (!projRes.ok) return false;
+        const projData = (await projRes.json()) as { projects?: ProjectInfo[] };
+        const target = normalizeCwd(workingDirectory);
+        const project = (projData.projects ?? []).find(
+          (p) => normalizeCwd(p.path) === target
+        );
+        if (!project) return false;
+        const convRes = await fetch(
+          conversationUrl(project.encodedName, sessionId)
+        );
+        if (!convRes.ok) return false;
+        const convData: { messages?: unknown[] } = await convRes.json();
+        const converted = convertHistoryMessages(convData.messages ?? []);
+        if (converted.length === 0) return false;
+        setMessages(converted);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [workingDirectory, setMessages]
+  );
+
   const streamCallbacks = useCallback(
     () => ({
       onMessage: (msg: ChatMessage) => addMessage(msg),
@@ -402,23 +443,50 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       onTokenUsage: (usage: { inputTokens: number; outputTokens: number }) =>
         setTokenUsage(usage),
       onTaskGone: () => {
-        // Task no longer exists on the server (backend restart, 30-min
-        // idle TTL eviction). Soft-clear the stale taskId + seq so the
-        // next prompt starts a fresh task instead of trying to reattach.
-        // Drop a quiet system note in the transcript instead of the red
-        // "previous task is no longer available" error — losing access
-        // to a server-side bookkeeping entry isn't something the user
-        // can do anything about; their NEXT prompt will just work.
+        // Task is no longer in the in-memory TaskRegistry (backend was
+        // restarted, workspace machine was off overnight, or the 30-min
+        // idle TTL evicted it). The SDK already wrote the FULL
+        // conversation to disk under `~/.claude/projects/<cwd>/`, so
+        // recover by pulling that transcript and rendering it — the
+        // user gets to see exactly what their unattended run produced
+        // instead of staring at a blank chat with a dead 404.
+        //
+        // Order matters:
+        //   1. Stop the active stream attempt (already done by the
+        //      streaming hook — it called onTaskGone then onDone).
+        //   2. Capture the sessionId BEFORE we clear taskId+seq, since
+        //      we'll need it for the disk lookup.
+        //   3. Soft-clear the stale taskId+seq so the NEXT prompt starts
+        //      a fresh task (no reattach attempt against the dead id).
+        //   4. Kick off the disk-restore in the background.
+        //   5. Show one of two system notes depending on whether the
+        //      restore actually found something to render.
+        const stuckSessionId = stateRef.current.sessionId ?? "";
         setCurrentRequestId(null);
         setLastSeq(-1);
-        addMessage({
-          id: `sys_taskgone_${Date.now()}`,
-          type: "system",
-          content:
-            "Previous task ended (backend restarted or session expired). " +
-            "Send a new message to continue — your chat history is preserved.",
-          timestamp: Date.now(),
-        });
+
+        void (async () => {
+          const restored = stuckSessionId
+            ? await restoreFromDisk(stuckSessionId)
+            : false;
+          // eslint-disable-next-line no-console
+          console.info("[chat-panel] onTaskGone disk restore:", {
+            sessionId: stuckSessionId,
+            restored,
+          });
+          addMessage({
+            id: `sys_taskgone_${Date.now()}`,
+            type: "system",
+            content: restored
+              ? "Workspace was offline, so the live task ended — but I pulled " +
+                "the saved transcript from disk so you can see what ran. " +
+                "Send a new message to pick up where you left off."
+              : "Previous task ended (workspace was off or the server " +
+                "restarted) and no saved transcript was found. " +
+                "Send a new message to continue — your chat history is preserved.",
+            timestamp: Date.now(),
+          });
+        })();
       },
       onTaskStarted: (taskId: string) => {
         // Server echos the requestId we generated, but call this anyway
@@ -568,7 +636,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         setCurrentRequestId(null);
       },
     }),
-    [addMessage, appendToLastMessage, finalizeLastMessage, setSessionId, setLoading, setCurrentRequestId, setLastSeq, state.currentRequestId, abort, stateRef, tabCtx, workingDirectory, setMessages]
+    [addMessage, appendToLastMessage, finalizeLastMessage, setSessionId, setLoading, setCurrentRequestId, setLastSeq, state.currentRequestId, abort, stateRef, tabCtx, workingDirectory, setMessages, restoreFromDisk]
   );
 
   /* ------------------------------------------------------------------
