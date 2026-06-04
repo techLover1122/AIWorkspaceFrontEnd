@@ -33,6 +33,7 @@ export type ElectronTabs = {
 type AIIDEGlobal = {
   tab?: ElectronTabs;
   onOpenTab?: (cb: (url: string, label: string) => void) => () => void;
+  tunnel?: import("./electronTunnel").ElectronTunnel;
 };
 
 declare global {

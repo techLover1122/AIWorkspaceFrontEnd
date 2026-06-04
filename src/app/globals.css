@@ -195,6 +195,18 @@ button {
   padding: 4px 6px;
 }
 
+.overlay-tunnel-status {
+  /* Phase 6 — tiny tunnel-status dot, leftmost element in the toolbar. */
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: #888;
+  flex-shrink: 0;
+  /* Hover tooltip is the title attribute; nothing else needed. */
+}
+
 .overlay-toolbar-btn,
 .overlay-toolbar-collapse,
 .overlay-toolbar-handle {
