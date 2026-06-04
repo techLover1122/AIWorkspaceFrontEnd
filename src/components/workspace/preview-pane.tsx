@@ -11,6 +11,7 @@ import {
   openInBrowserTab,
   openManagedPopup,
 } from "../../utils/iframeCompat";
+import { getElectronTabs } from "../../utils/electronTabs";
 import type { EditorOverlayTool } from "./editor-overlay-toolbar";
 
 export type DrawingPoint = { x: number; y: number };
@@ -52,10 +53,13 @@ type PreviewPaneProps = {
    *  in its place — used by the annotation flow to freeze the iframe at
    *  the moment the user opened the toolbar. */
   snapshot?: string;
-  /** Reports the iframe element + drawings SVG element back to the parent
-   *  so the screen-capture + composite helpers can find them. */
+  /** Reports the tab-content host element + drawings SVG element back to the
+   *  parent so the screen-capture + composite helpers can find them. In
+   *  Electron mode this is the `.preview-content` div whose rect represents
+   *  where the WebContentsView sits; in the browser fallback it's the same
+   *  div, but the rect is also the iframe's rect (they coincide). */
   onElementsReady?: (els: {
-    iframe: HTMLIFrameElement | null;
+    contentEl: HTMLElement | null;
     svg: SVGSVGElement | null;
   }) => void;
   /** Fires whenever the iframe starts/stops loading. Drives the tab strip's
@@ -105,23 +109,61 @@ export function PreviewPane({
 }: PreviewPaneProps) {
   const tabCtx = useWorkspaceTab();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const drawingsSvgRef = useRef<SVGSVGElement>(null);
+
+  // Electron WebContentsView path. When the preload exposes __AIIDE__.tab,
+  // every tab with a real URL is hosted by a main-process WebContentsView
+  // (one CDP page target per tab) instead of a DOM <iframe>. Falls back to
+  // <iframe> when running in a regular browser — keeps `next dev` workable.
+  const electron = getElectronTabs();
+  const isExternalContent = !!url && url !== PORTS_VIEW_URL;
+  const useView = !!electron && isExternalContent;
 
   // Mark the tab as loading the moment its URL changes (the iframe will
   // refetch) and clear it again on the next `load` event. Empty URL = the
   // "new tab" page, which doesn't fetch anything, so we never enter the
-  // loading state for it.
+  // loading state for it. In Electron mode, the main process owns the
+  // loading signal — the workspace shell subscribes via __AIIDE__.tab.
   const onLoadingChangeRef = useRef(onLoadingChange);
   useEffect(() => {
     onLoadingChangeRef.current = onLoadingChange;
   }, [onLoadingChange]);
   useEffect(() => {
+    if (useView) return; // main-process events drive loading state
     if (!url || url === PORTS_VIEW_URL) {
       onLoadingChangeRef.current?.(tabId, false);
       return;
     }
     onLoadingChangeRef.current?.(tabId, true);
-  }, [tabId, url]);
+  }, [tabId, url, useView]);
+
+  // ── Electron tab lifecycle ───────────────────────────────────────────
+  // open on mount / close on unmount; navigate / setVisible as props change.
+  // No effect if useView is false.
+  useEffect(() => {
+    if (!useView || !electron) return;
+    electron.open(tabId, url).catch(() => { /* logged in main */ });
+    return () => {
+      electron.close(tabId).catch(() => { /* tab already gone */ });
+    };
+    // open is intentionally per-tabId only — URL changes go through navigate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId, useView]);
+
+  useEffect(() => {
+    if (!useView || !electron) return;
+    electron.navigate(tabId, url).catch(() => {});
+  }, [tabId, url, useView, electron]);
+
+  // Show this tab's view only while it's the active tab AND no snapshot
+  // overlay is up. Snapshot mode renders a static <img> + drawings in the
+  // DOM; the live view must be hidden behind it.
+  useEffect(() => {
+    if (!useView || !electron) return;
+    const shouldShow = isActive && !snapshot;
+    electron.setVisible(tabId, shouldShow).catch(() => {});
+  }, [tabId, isActive, snapshot, useView, electron]);
   // Position of an in-flight comment that hasn't been committed yet — the
   // popover lives at this point until the user types and confirms, or
   // dismisses with Esc / empty submit.
@@ -141,10 +183,10 @@ export function PreviewPane({
   // Report element refs whenever they're attached. Plain effect on every
   // render keeps the parent's map in sync — the workspace shell reads
   // these at capture / composite time. tabId / url change re-runs to
-  // catch the iframe re-creation on URL switch.
+  // catch the host element re-creation on URL switch.
   useEffect(() => {
     onElementsReady?.({
-      iframe: iframeRef.current,
+      contentEl: contentRef.current ?? iframeRef.current,
       svg: drawingsSvgRef.current,
     });
   });
@@ -194,7 +236,12 @@ export function PreviewPane({
   // frame-ancestors. Render the BlockedServicePanel instead of the
   // iframe — the panel gives the user one-click "open externally"
   // options without their workspace ever unloading.
-  if (compat.blocked) {
+  //
+  // Skipped in Electron mode: a WebContentsView is a top-level page, not
+  // an embedded frame, so X-Frame-Options and frame-ancestors don't apply.
+  // Anything that's only blocked because of embedding restrictions loads
+  // fine inside the view.
+  if (compat.blocked && !useView) {
     return (
       <div className="preview-frame" style={hiddenStyle}>
         <BlockedServicePanel url={url} info={compat} />
@@ -202,8 +249,10 @@ export function PreviewPane({
     );
   }
 
-  // Layered above the iframe (low → high z-index):
-  //   1. <iframe> — the live preview (or hidden behind snapshot)
+  // Layered (low → high z-index):
+  //   1. <iframe> — the live preview (browser fallback only)
+  //      OR an empty .preview-content div whose rect drives the
+  //      WebContentsView's setBounds (Electron mode)
   //   2. <img snapshot> — frozen pixels when snapshot mode is active
   //   3. comments surface — when comments tool is active (catches clicks)
   //   4. drawing surface — when marker tool is active (catches clicks)
@@ -218,19 +267,26 @@ export function PreviewPane({
   // comments tools and stays consistently placed across tabs.
   return (
     <div className="preview-frame" style={hiddenStyle}>
-      <div className="preview-content">
-        <iframe
-          className="preview-iframe"
-          src={url}
-          title="Preview"
-          loading="lazy"
-          ref={iframeRef}
-          onLoad={() => onLoadingChangeRef.current?.(tabId, false)}
-          // While a snapshot is being annotated, keep the iframe in the
-          // DOM (so unmounting doesn't lose its state) but invisible
-          // behind the static image.
-          style={snapshot ? { visibility: "hidden" } : undefined}
-        />
+      <div className="preview-content" ref={contentRef}>
+        {useView ? (
+          // The WebContentsView is composited above the renderer by Electron.
+          // Nothing to render here — the preview-content div is just a layout
+          // anchor whose rect drives setBounds (read by the workspace shell).
+          null
+        ) : (
+          <iframe
+            className="preview-iframe"
+            src={url}
+            title="Preview"
+            loading="lazy"
+            ref={iframeRef}
+            onLoad={() => onLoadingChangeRef.current?.(tabId, false)}
+            // While a snapshot is being annotated, keep the iframe in the
+            // DOM (so unmounting doesn't lose its state) but invisible
+            // behind the static image.
+            style={snapshot ? { visibility: "hidden" } : undefined}
+          />
+        )}
 
         {/*
           Escape-hatch overlay: every iframe gets a tiny "open externally"

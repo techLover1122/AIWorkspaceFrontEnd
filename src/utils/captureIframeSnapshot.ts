@@ -1,36 +1,67 @@
 /**
- * Capture the rendered pixels of an iframe element via the browser's screen
- * capture API (`getDisplayMedia`). Bypasses the cross-origin DOM access
- * restrictions entirely — we're reading what the user already sees, not
- * peering into the iframe's document.
+ * Capture the rendered pixels of the active tab's content area as a PNG data
+ * URL. Two implementations, picked at call time:
  *
- * Caveats baked in:
- *   - Browser shows a "what to share" picker. With `preferCurrentTab: true`
- *     on Chrome 102+ this is one click; on Firefox/Safari it's a normal
- *     source picker. Either way the user has to grant once per call.
- *   - We must hide our own overlays (toolbar, etc.) before capture or
- *     they'll bake into the snapshot. The `onHideOverlays` callback fires
- *     just before grabbing the frame; `onShowOverlays` fires after.
- *   - The captured stream is in device pixels. iframe.getBoundingClientRect
- *     is in CSS pixels. We multiply by devicePixelRatio when cropping.
- *   - The user may share a different surface than the current tab (e.g. a
- *     window or whole screen). We can't reliably tell — we just crop to the
- *     iframe's viewport rect, which is correct when sharing the current tab
- *     and unhelpful when sharing something else. Mitigation: provide
- *     `preferCurrentTab` and accept the rest as user error.
+ *   1. Electron mode (`__AIIDE__.tab` exists) — the main process calls
+ *      `webContents.capturePage()` on the tab's WebContentsView. No user
+ *      permission prompt, no devicePixelRatio cropping math, no "what to
+ *      share" picker. The returned PNG is exactly the view's pixel content.
+ *
+ *   2. Browser fallback (`navigator.mediaDevices.getDisplayMedia`) — the
+ *      legacy path for `npm run dev` outside Electron. Caveats:
+ *        - Browser shows a "what to share" picker; with `preferCurrentTab`
+ *          on Chrome 102+ it's one click.
+ *        - We must hide our own overlays (toolbar, etc.) before capture or
+ *          they'll bake into the snapshot. The `onHideOverlays` /
+ *          `onShowOverlays` callbacks bracket the grab.
+ *        - Captured stream is in device pixels; bounding rect is CSS
+ *          pixels. We multiply by devicePixelRatio when cropping.
+ *        - The user may share a different surface (e.g. whole screen). We
+ *          can't reliably tell — we crop to the iframe's viewport rect,
+ *          which is correct when sharing the current tab and unhelpful
+ *          otherwise. Mitigation: `preferCurrentTab`, accept the rest.
  */
 
+import { getElectronTabs } from "./electronTabs";
+
 type CaptureOptions = {
-  iframe: HTMLIFrameElement;
+  /** The tab being captured. Only used in Electron mode (passed to the
+   *  main-process capture IPC). */
+  tabId: string;
+  /** The DOM element whose rect represents where the tab content sits on
+   *  screen. In the browser fallback this is the iframe; in Electron mode
+   *  it's the `.preview-content` placeholder div. Both have the same rect. */
+  contentEl: HTMLElement;
   onHideOverlays?: () => void;
   onShowOverlays?: () => void;
 };
 
-export async function captureIframeSnapshot({
-  iframe,
+export async function captureTabSnapshot(opts: CaptureOptions): Promise<string> {
+  const electron = getElectronTabs();
+  if (electron) {
+    // Electron mode is fundamentally different — no surface picker, no DPR
+    // math. Briefly hide overlays so any composited DOM overlay (e.g. the
+    // toolbar) doesn't end up double-rendered on screen during the capture
+    // animation. The capture itself is pixels from the WebContentsView's
+    // own raster, not the renderer's, so technically overlays would never
+    // be in it — but hiding keeps the visual handoff smooth.
+    opts.onHideOverlays?.();
+    try {
+      const { dataUrl } = await electron.capture(opts.tabId);
+      return dataUrl;
+    } finally {
+      opts.onShowOverlays?.();
+    }
+  }
+  return captureViaDisplayMedia(opts);
+}
+
+async function captureViaDisplayMedia({
+  contentEl,
   onHideOverlays,
   onShowOverlays,
 }: CaptureOptions): Promise<string> {
+  const iframe = contentEl;
   // 1. Request the user's screen / window / tab. preferCurrentTab is a
   //    Chrome extension that auto-selects this tab when the user has
   //    previously granted permission for it.

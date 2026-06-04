@@ -5,6 +5,7 @@ import { createInitialTabs } from "../../constant/constants";
 import { logTabUrl, openedUrlsUrl, setOpenedUrl, urlsUrl, eventsUrl } from "../../constant/api";
 import { toPublicServiceUrl } from "../../utils/registerService";
 import { WorkspaceTabContext } from "../../contexts/WorkspaceTabContext";
+import { getElectronTabs } from "../../utils/electronTabs";
 import { ChatPanel } from "./chat-panel";
 import { EditorTabs } from "./editor-tabs";
 import { EditorOverlayToolbar, type EditorOverlayTool } from "./editor-overlay-toolbar";
@@ -17,7 +18,7 @@ import {
 import type { EditorTab, TabGroup } from "../../types/types";
 import type { ChatInputHandle } from "../chat/ChatInput";
 import {
-  captureIframeSnapshot,
+  captureTabSnapshot,
   compositeSnapshotWithSvg,
 } from "../../utils/captureIframeSnapshot";
 
@@ -138,42 +139,44 @@ export function WorkspaceShell({
   // Imperative handle into ChatInput so we can drop the composited snapshot
   // PNG as an attachment after Send.
   const chatInputRef = useRef<ChatInputHandle>(null);
-  // PreviewPane reports its <iframe> and drawings <svg> elements to these
-  // maps via callback props (see `onElementsReady` on PreviewPane). Lets us
-  // grab the right DOM nodes at capture / composite time without prop
-  // drilling refs through the tree.
-  const iframeRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
+  // PreviewPane reports its content host element + drawings <svg> via
+  // `onElementsReady`. The host is the iframe in the browser-fallback path
+  // and the .preview-content div in the Electron WebContentsView path —
+  // both have the same on-screen rect, so capture / composite math is the
+  // same regardless.
+  const contentRefs = useRef<Record<string, HTMLElement | null>>({});
   const drawingSvgRefs = useRef<Record<string, SVGSVGElement | null>>({});
 
   const registerPreviewElements = useCallback(
     (
       tabId: string,
-      els: { iframe: HTMLIFrameElement | null; svg: SVGSVGElement | null }
+      els: { contentEl: HTMLElement | null; svg: SVGSVGElement | null }
     ) => {
-      iframeRefs.current[tabId] = els.iframe;
+      contentRefs.current[tabId] = els.contentEl;
       drawingSvgRefs.current[tabId] = els.svg;
     },
     []
   );
 
-  // Reload the currently-active tab's iframe. Wired to the overlay
-  // toolbar's refresh button so it works for any URL — code-server,
-  // dev-server preview, external sites. Same "bounce src through
-  // about:blank" trick the old floating button used: cross-origin
-  // iframes can't be reloaded via contentWindow.location.reload()
-  // without a SecurityError, but reassigning src works universally.
+  // Reload the currently-active tab. In Electron mode this is a single IPC
+  // round-trip to the WebContentsView (cleanest possible reload). In browser
+  // mode we fall back to the "bounce iframe src through about:blank" trick
+  // because cross-origin iframes can't be reloaded via contentWindow without
+  // a SecurityError.
   const handleActiveTabReload = useCallback(() => {
-    const iframe = iframeRefs.current[activeTabId];
-    if (!iframe) return;
-    const src = iframe.src;
-    // src is mutated imperatively here (bypassing the `url` prop / useEffect
-    // in PreviewPane), so flag loading manually — the iframe's `onLoad`
-    // will clear it once the reload finishes.
-    handleTabLoadingChange(activeTabId, true);
-    iframe.src = "about:blank";
-    requestAnimationFrame(() => {
-      iframe.src = src;
-    });
+    const electron = getElectronTabs();
+    if (electron) {
+      handleTabLoadingChange(activeTabId, true);
+      electron.reload(activeTabId).catch(() => {});
+      return;
+    }
+    const el = contentRefs.current[activeTabId];
+    if (el && el instanceof HTMLIFrameElement) {
+      const src = el.src;
+      handleTabLoadingChange(activeTabId, true);
+      el.src = "about:blank";
+      requestAnimationFrame(() => { el.src = src; });
+    }
   }, [activeTabId, handleTabLoadingChange]);
 
   const addDrawing = useCallback((targetTabId: string, points: DrawingPoint[]) => {
@@ -230,18 +233,20 @@ export function WorkspaceShell({
   );
 
   // Called when the overlay toolbar expands from its collapsed handle —
-  // capture the iframe's currently-rendered pixels (via getDisplayMedia),
-  // freeze it as a static image overlay, and auto-select the marker so
-  // the user can immediately start drawing. Collapse / Send exits the
-  // snapshot mode and restores the live iframe.
+  // capture the active tab's currently-rendered pixels, freeze as a static
+  // overlay, and arm the marker tool. In Electron mode capture is a single
+  // IPC call to webContents.capturePage() (no user permission prompt). In
+  // the browser fallback it uses getDisplayMedia (user picks the surface).
+  // Collapse / Send exits snapshot mode and restores the live content.
   const handleToolbarExpand = useCallback(async () => {
     const targetId = activeTabId;
-    const iframe = iframeRefs.current[targetId];
-    if (!iframe) return;
+    const contentEl = contentRefs.current[targetId];
+    if (!contentEl) return;
     try {
       setIsCapturing(true);
-      const dataUrl = await captureIframeSnapshot({
-        iframe,
+      const dataUrl = await captureTabSnapshot({
+        tabId: targetId,
+        contentEl,
         onHideOverlays: () => setIsCapturing(true),
         onShowOverlays: () => setIsCapturing(false),
       });
@@ -313,8 +318,8 @@ export function WorkspaceShell({
     const snapshot = snapshotByTab[targetId];
     if (!snapshot) return;
     const svg = drawingSvgRefs.current[targetId];
-    const iframe = iframeRefs.current[targetId];
-    const rect = iframe?.getBoundingClientRect();
+    const contentEl = contentRefs.current[targetId];
+    const rect = contentEl?.getBoundingClientRect();
     const cssW = rect?.width ?? 1280;
     const cssH = rect?.height ?? 800;
     // Snapshot the comments for this tab before we clear them — we'll
@@ -382,6 +387,62 @@ export function WorkspaceShell({
       setChatWidth(Math.max(MIN_CHAT_WIDTH, Math.min(max, parsed)));
     }
   }, []);
+
+  // ── Electron loading-state subscription ─────────────────────────────
+  // In Electron mode, the iframe's `onLoad` callback is replaced by
+  // did-start-loading / did-stop-loading events fired by the main process.
+  // Subscribe once at mount; the unsubscribe handler is returned from the
+  // preload API.
+  useEffect(() => {
+    const electron = getElectronTabs();
+    if (!electron) return;
+    return electron.onLoadingChange((tabId, loading) => {
+      handleTabLoadingChange(tabId, loading);
+    });
+  }, [handleTabLoadingChange]);
+
+  // ── Bounds contract (Electron mode) ─────────────────────────────────
+  // The WebContentsView for the active tab is positioned by the main
+  // process. We measure the editor-body div's rect on every layout change
+  // (window resize, chat-panel resize, toolbar toggle, active tab change)
+  // and forward it to main via tab.setBounds(activeTabId, rect).
+  //
+  // No-op in browser mode — the <iframe> lays itself out via DOM.
+  const editorBodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const electron = getElectronTabs();
+    if (!electron) return;
+    const el = editorBodyRef.current;
+    if (!el) return;
+
+    let rafId = 0;
+    const push = () => {
+      rafId = 0;
+      const r = el.getBoundingClientRect();
+      electron
+        .setBounds(activeTabId, {
+          x: r.left,
+          y: r.top,
+          width: r.width,
+          height: r.height,
+        })
+        .catch(() => {});
+    };
+    const schedule = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(push);
+    };
+
+    schedule(); // initial
+    const ro = new ResizeObserver(schedule);
+    ro.observe(el);
+    window.addEventListener("resize", schedule);
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      ro.disconnect();
+      window.removeEventListener("resize", schedule);
+    };
+  }, [activeTabId, chatWidth, toolbarVisible]);
 
   useEffect(() => {
     if (isResizing) return;
@@ -605,7 +666,7 @@ export function WorkspaceShell({
         next.delete(tabId);
         return next;
       });
-      delete iframeRefs.current[tabId];
+      delete contentRefs.current[tabId];
       delete drawingSvgRefs.current[tabId];
 
       const nextTabs = currentTabs.filter((t) => t.id !== tabId);
@@ -774,11 +835,14 @@ export function WorkspaceShell({
                 hasSnapshot={!!snapshotByTab[activeTab.id]}
               />
             )}
-            <div className="editor-body">
+            <div className="editor-body" ref={editorBodyRef}>
               {/* Render every tab simultaneously and hide non-active ones via
                   `display:none` (handled inside PreviewPane). Keeps iframes
                   and any in-page state mounted across tab switches so the
-                  user doesn't see a full reload when returning to a tab. */}
+                  user doesn't see a full reload when returning to a tab.
+                  In Electron mode, the tab content is a main-process
+                  WebContentsView composited above this div; each PreviewPane
+                  only renders DOM overlays (snapshot, drawings, comments). */}
               {tabs.map((tab) => (
                 <PreviewPane
                   key={tab.id}
