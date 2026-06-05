@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   whatsappPairPhoneUrl,
   whatsappQrUrl,
+  whatsappRecipientUrl,
   whatsappStatusUrl,
   whatsappUnlinkUrl,
 } from "../../constant/api";
@@ -32,6 +33,7 @@ type Status = {
   connected?: boolean;
   jid?: string;
   phone?: string;
+  recipientPhone?: string;
   lastError?: string;
   sidecarReachable?: boolean;
   error?: string;
@@ -59,6 +61,9 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recipientDraft, setRecipientDraft] = useState("");
+  const [recipientBusy, setRecipientBusy] = useState(false);
+  const [recipientNote, setRecipientNote] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Reset when the modal closes so the next open starts clean.
@@ -70,7 +75,17 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
     setPairingCode(null);
     setBusy(false);
     setError(null);
+    setRecipientDraft("");
+    setRecipientBusy(false);
+    setRecipientNote(null);
   }, [open]);
+
+  // Seed the recipient input from the latest status snapshot so the
+  // user sees what's currently configured when they open the modal.
+  useEffect(() => {
+    if (!status?.recipientPhone) return;
+    setRecipientDraft((cur) => (cur === "" ? status.recipientPhone! : cur));
+  }, [status?.recipientPhone]);
 
   // In the Electron desktop app, user tabs render as native
   // WebContentsViews stacked ABOVE the page DOM. A regular CSS overlay
@@ -191,6 +206,36 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
     }
   };
 
+  const handleSaveRecipient = async (clear: boolean) => {
+    setRecipientBusy(true);
+    setRecipientNote(null);
+    try {
+      const res = await fetch(whatsappRecipientUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: clear ? "" : recipientDraft.trim() }),
+      });
+      const body = (await res.json()) as {
+        recipientPhone?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        setRecipientNote(body.error ?? `Failed (HTTP ${res.status})`);
+        return;
+      }
+      setRecipientNote(
+        body.recipientPhone
+          ? `Saved. Notifications will go to ${body.recipientPhone}.`
+          : "Cleared. Notifications will go to your own Message Yourself chat."
+      );
+      if (clear) setRecipientDraft("");
+    } catch (err) {
+      setRecipientNote(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRecipientBusy(false);
+    }
+  };
+
   const handleUnlink = async () => {
     const ok = window.confirm(
       "Unlink WhatsApp? You'll need to re-scan the QR or re-pair to receive notifications again."
@@ -235,9 +280,10 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
 
         <p style={subtleStyle}>
           Linking your account turns the agent into one of your WhatsApp
-          linked devices. All messages — both ways — go through your own{" "}
-          <strong>“Message Yourself”</strong> chat. No separate phone
-          number to enter.
+          linked devices. Outbound notifications go to whichever number
+          you configure below — your own{" "}
+          <strong>&quot;Message Yourself&quot;</strong> chat by default, or any
+          other contact you set as the recipient.
         </p>
 
         {isUnconfigured ? (
@@ -254,11 +300,59 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
                 <span style={{ color: "#c66", marginLeft: 8 }}>(reconnecting…)</span>
               )}
             </p>
+
+            <div style={recipientBoxStyle}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                Recipient
+              </div>
+              <div style={subtleStyle}>
+                Currently sending to{" "}
+                <strong>
+                  {status?.recipientPhone
+                    ? status.recipientPhone
+                    : "your own Message Yourself chat"}
+                </strong>
+                . Change it to any WhatsApp number — yours, a teammate&apos;s,
+                anyone you can normally text.
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input
+                  type="tel"
+                  placeholder="+14155552671"
+                  value={recipientDraft}
+                  onChange={(e) => setRecipientDraft(e.target.value)}
+                  style={inputStyle}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleSaveRecipient(false)}
+                  disabled={recipientBusy || !recipientDraft.trim()}
+                  style={primaryBtnStyle}
+                >
+                  {recipientBusy ? "Saving…" : "Save"}
+                </button>
+              </div>
+              {status?.recipientPhone && (
+                <button
+                  type="button"
+                  onClick={() => handleSaveRecipient(true)}
+                  disabled={recipientBusy}
+                  style={{ ...subtleBtnStyle, marginTop: 8 }}
+                >
+                  Use my Message Yourself chat instead
+                </button>
+              )}
+              {recipientNote && (
+                <div style={{ ...subtleStyle, marginTop: 8 }}>
+                  {recipientNote}
+                </div>
+              )}
+            </div>
+
             <p style={subtleStyle}>
-              All agent ↔ user messages flow through your{" "}
-              <strong>&quot;Message Yourself&quot;</strong> chat. The agent
-              posts there when a task finishes, asks for a permission, or
-              opens a question. Reply in the same chat to drive the agent —
+              The agent posts to the recipient when a task finishes, asks
+              for a permission, or opens a question. The recipient (or you,
+              if it&apos;s the self-chat) drives the agent by replying —
               yes/no for permissions, numbers for option picks, anything
               else starts a new turn.
             </p>
@@ -485,4 +579,21 @@ const errorStyle: CSSProperties = {
   color: "#e88",
   fontSize: 13,
   marginTop: 10,
+};
+
+const recipientBoxStyle: CSSProperties = {
+  padding: 12,
+  background: "#0e0e0e",
+  borderRadius: 6,
+  border: "1px solid #2a2a2a",
+};
+
+const subtleBtnStyle: CSSProperties = {
+  padding: "6px 10px",
+  background: "transparent",
+  color: "#9aa",
+  border: "1px solid #333",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontSize: 12,
 };

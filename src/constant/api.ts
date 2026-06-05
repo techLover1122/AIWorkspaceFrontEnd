@@ -163,5 +163,8 @@ export function whatsappPairPhoneUrl(): string {
 export function whatsappUnlinkUrl(): string {
   return `${BACKEND_URL}/api/whatsapp/unlink`;
 }
+export function whatsappRecipientUrl(): string {
+  return `${BACKEND_URL}/api/whatsapp/recipient`;
+}
 
 export { BACKEND_URL };
