@@ -7,6 +7,7 @@ import {
   whatsappStatusUrl,
   whatsappUnlinkUrl,
 } from "../../constant/api";
+import { getElectronTabs } from "../../utils/electronTabs";
 
 /**
  * WhatsApp link modal — pair the workspace's ai-ide-whatsapp sidecar
@@ -69,6 +70,43 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
     setPairingCode(null);
     setBusy(false);
     setError(null);
+  }, [open]);
+
+  // In the Electron desktop app, user tabs render as native
+  // WebContentsViews stacked ABOVE the page DOM. A regular CSS overlay
+  // is hidden behind them. Workaround: enumerate visible tabs when the
+  // modal opens, hide them, then restore on close. No-op outside
+  // Electron (browser dev — there are no tabs).
+  useEffect(() => {
+    if (!open) return;
+    const electron = getElectronTabs();
+    if (!electron) return;
+
+    let cancelled = false;
+    let hiddenIds: string[] = [];
+    void (async () => {
+      try {
+        const { tabs } = await electron.list();
+        if (cancelled) return;
+        hiddenIds = tabs.filter((t) => t.visible).map((t) => t.tabId);
+        await Promise.all(
+          hiddenIds.map((id) => electron.setVisible(id, false).catch(() => {}))
+        );
+      } catch {
+        /* swallow — if list/hide fails the modal still renders, just over a
+           visible tab. Better than crashing the modal. */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (hiddenIds.length === 0) return;
+      // Restore on close — fire and forget; any tab that got destroyed
+      // in the meantime will just reject and be ignored.
+      void Promise.all(
+        hiddenIds.map((id) => electron.setVisible(id, true).catch(() => {}))
+      );
+    };
   }, [open]);
 
   // Status fetch on open + polling.
