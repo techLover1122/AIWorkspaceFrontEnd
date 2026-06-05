@@ -166,5 +166,8 @@ export function whatsappUnlinkUrl(): string {
 export function whatsappRecipientUrl(): string {
   return `${BACKEND_URL}/api/whatsapp/recipient`;
 }
+export function whatsappForwardingUrl(): string {
+  return `${BACKEND_URL}/api/whatsapp/forwarding`;
+}
 
 export { BACKEND_URL };

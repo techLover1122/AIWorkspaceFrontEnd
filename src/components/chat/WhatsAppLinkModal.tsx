@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
+  whatsappForwardingUrl,
   whatsappPairPhoneUrl,
   whatsappQrUrl,
   whatsappRecipientUrl,
@@ -64,6 +65,8 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
   const [recipientDraft, setRecipientDraft] = useState("");
   const [recipientBusy, setRecipientBusy] = useState(false);
   const [recipientNote, setRecipientNote] = useState<string | null>(null);
+  const [forwardingEnabled, setForwardingEnabled] = useState<boolean | null>(null);
+  const [forwardingBusy, setForwardingBusy] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Reset when the modal closes so the next open starts clean.
@@ -78,7 +81,51 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
     setRecipientDraft("");
     setRecipientBusy(false);
     setRecipientNote(null);
+    setForwardingEnabled(null);
+    setForwardingBusy(false);
   }, [open]);
+
+  // Fetch the forwarding toggle state on open. The backend stores it
+  // per-workspace in SQLite; reset to "off" after an EC2 rebuild.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(whatsappForwardingUrl());
+        if (!res.ok) return;
+        const body = (await res.json()) as { enabled?: boolean };
+        if (cancelled) return;
+        setForwardingEnabled(body.enabled === true);
+      } catch {
+        /* swallow — the toggle just won't render until next open */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const handleToggleForwarding = async (next: boolean) => {
+    setForwardingBusy(true);
+    // Optimistic update so the checkbox snaps even if the network is slow.
+    setForwardingEnabled(next);
+    try {
+      const res = await fetch(whatsappForwardingUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!res.ok) {
+        // Roll back on failure.
+        setForwardingEnabled(!next);
+      }
+    } catch {
+      setForwardingEnabled(!next);
+    } finally {
+      setForwardingBusy(false);
+    }
+  };
 
   // Seed the recipient input from the latest status snapshot so the
   // user sees what's currently configured when they open the modal.
@@ -356,6 +403,36 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
               yes/no for permissions, numbers for option picks, anything
               else starts a new turn.
             </p>
+
+            <div style={recipientBoxStyle}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                Forwarding
+              </div>
+              <div style={subtleStyle}>
+                By default, the agent only routes prompts to WhatsApp when
+                you&apos;ve closed the workspace or haven&apos;t answered for
+                5 minutes. Enable forwarding to receive every prompt on
+                your phone regardless of whether you&apos;re here.
+              </div>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginTop: 8,
+                  cursor: forwardingBusy || forwardingEnabled === null ? "wait" : "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={forwardingEnabled === true}
+                  disabled={forwardingBusy || forwardingEnabled === null}
+                  onChange={(e) => void handleToggleForwarding(e.target.checked)}
+                />
+                <span>Always forward notifications to WhatsApp</span>
+              </label>
+            </div>
+
             <button
               type="button"
               onClick={handleUnlink}
