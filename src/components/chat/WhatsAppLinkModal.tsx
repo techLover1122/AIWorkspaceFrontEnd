@@ -233,6 +233,13 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
           </button>
         </div>
 
+        <p style={subtleStyle}>
+          Linking your account turns the agent into one of your WhatsApp
+          linked devices. All messages — both ways — go through your own{" "}
+          <strong>“Message Yourself”</strong> chat. No separate phone
+          number to enter.
+        </p>
+
         {isUnconfigured ? (
           <p style={errorStyle}>
             WhatsApp integration isn&apos;t installed on this workspace. The operator
@@ -248,9 +255,12 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
               )}
             </p>
             <p style={subtleStyle}>
-              The agent will ping this number when a task finishes, asks for a
-              permission, or opens a question — and you can drive the agent by
-              texting the &quot;Message Yourself&quot; chat in WhatsApp.
+              All agent ↔ user messages flow through your{" "}
+              <strong>&quot;Message Yourself&quot;</strong> chat. The agent
+              posts there when a task finishes, asks for a permission, or
+              opens a question. Reply in the same chat to drive the agent —
+              yes/no for permissions, numbers for option picks, anything
+              else starts a new turn.
             </p>
             <button
               type="button"
