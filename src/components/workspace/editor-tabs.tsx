@@ -170,6 +170,13 @@ export function EditorTabs({
           }
           data-group={group?.id}
           data-group-start={isGroupStart ? "" : undefined}
+          /* Phase 5 — let MCP-side callers find the active tab from a shell
+             snapshot without needing a separate IPC: every editor-tab
+             carries its tabId, and the active one is flagged with
+             data-active. Read with
+             `document.querySelector('[data-active]')?.dataset.tabId`. */
+          data-tab-id={tab.id}
+          data-active={activeTabId === tab.id ? "" : undefined}
           onClick={() => onSelectTab(tab.id)}
           onContextMenu={(e) => handleContextMenu(e, tab.id)}
           onKeyDown={(e) => {

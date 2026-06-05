@@ -1,5 +1,7 @@
 "use client";
 
+import { useTunnelStatus, type TunnelStatusValue } from "../../utils/electronTunnel";
+
 export type EditorOverlayTool = "pointer" | "comments";
 
 type EditorOverlayToolbarProps = {
@@ -103,6 +105,11 @@ export function EditorOverlayToolbar({
 
   return (
     <div className={`editor-overlay-toolbar${className ? ` ${className}` : ""}`}>
+      {/* Phase 6 — tunnel status dot. Sits on the left of the toolbar so
+          it never collides with the right-aligned annotation tools. Hidden
+          in non-Electron contexts. */}
+      <TunnelStatusDot />
+
       {/* Refresh — always visible. Works for any tab URL. */}
       <button
         type="button"
@@ -189,6 +196,45 @@ export function EditorOverlayToolbar({
         <IconChevronRight />
       </button>
     </div>
+  );
+}
+
+/* ============================================================
+   Tunnel status indicator (Phase 6)
+   ============================================================ */
+
+const STATUS_COLOR: Record<TunnelStatusValue, string> = {
+  idle: "#888",
+  granting: "#eab308",
+  connecting: "#eab308",
+  connected: "#22c55e",
+  reconnecting: "#f97316",
+  error: "#ef4444",
+};
+
+const STATUS_LABEL: Record<TunnelStatusValue, string> = {
+  idle: "Tunnel idle",
+  granting: "Tunnel — requesting access…",
+  connecting: "Tunnel — connecting…",
+  connected: "Tunnel connected",
+  reconnecting: "Tunnel reconnecting…",
+  error: "Tunnel error",
+};
+
+function TunnelStatusDot() {
+  const status = useTunnelStatus();
+  if (!status) return null; // outside Electron, or pre-first-status paint
+  const color = STATUS_COLOR[status.status];
+  const label = status.error
+    ? `${STATUS_LABEL[status.status]} — ${status.error}`
+    : STATUS_LABEL[status.status];
+  return (
+    <span
+      className="overlay-tunnel-status"
+      title={label}
+      aria-label={label}
+      style={{ background: color }}
+    />
   );
 }
 

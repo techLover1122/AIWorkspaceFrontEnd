@@ -173,37 +173,38 @@ button {
 /* ===== Editor overlay toolbar (port preview tools) ===== */
 
 .editor-overlay-toolbar {
-  /* Slide out from the chat-panel edge — flush against the right side so
-     the toolbar reads as a drawer attached to the chat panel, both when
-     expanded and (especially) when collapsed into a handle. */
-  position: absolute;
-  top: 44px; /* 35px tab strip + 9px gap */
-  right: 0;
-  z-index: 10;
-  display: inline-flex;
+  /* Phase 1: lives ABOVE the tab strip as part of the editor chrome.
+     WebContentsView tabs composite above the renderer, so anything
+     floating over the content area is occluded — chrome stays visible. */
+  display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 3px;
-  padding: 4px;
+  padding: 4px 6px;
+  height: 36px;
   background: var(--vsc-panel, #1f1f1f);
-  border: 1px solid var(--vsc-border-strong);
-  border-right: 0; /* flush against the chat-panel — no doubled edge */
-  border-radius: 10px 0 0 10px;
-  box-shadow: -2px 2px 10px rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid var(--vsc-border-strong);
   overflow: hidden;
-  max-width: 360px;
-  transition:
-    max-width 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    padding 220ms cubic-bezier(0.4, 0, 0.2, 1),
-    border-radius 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: padding 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .editor-overlay-toolbar.collapsed {
-  /* 32 px handle + 2 × 4 px padding = 40 px. With box-sizing: border-box,
-     a smaller max-width clips the button's right edge — keep these in sync
-     when adjusting the handle size. */
-  max-width: 40px;
-  padding: 4px;
-  border-radius: 999px 0 0 999px;
+  /* Same chrome row height — collapsed mode just shows the handle on the
+     right so the row's geometry doesn't change (avoids re-firing the
+     setBounds contract whenever the user toggles visibility). */
+  padding: 4px 6px;
+}
+
+.overlay-tunnel-status {
+  /* Phase 6 — tiny tunnel-status dot, leftmost element in the toolbar. */
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: #888;
+  flex-shrink: 0;
+  /* Hover tooltip is the title attribute; nothing else needed. */
 }
 
 .overlay-toolbar-btn,
