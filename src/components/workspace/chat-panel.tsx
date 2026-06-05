@@ -28,6 +28,7 @@ import { IntentGuardPanel } from "../chat/IntentGuardPanel";
 import { AnomalyAlertBanner } from "../chat/AnomalyAlert";
 import { HistoryView } from "../chat/HistoryView";
 import { EnvironmentPackModal, type InstalledPack } from "../chat/EnvironmentPackModal";
+import { WhatsAppLinkModal } from "../chat/WhatsAppLinkModal";
 import { AskUserQuestionModal } from "../chat/AskUserQuestionModal";
 import { MiniBot } from "../chat/MiniBot";
 import { TypingIndicator } from "../chat/AnimatedAIBot";
@@ -220,6 +221,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   const [showHistory, setShowHistory] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [askQuestion, setAskQuestion] = useState<AskUserQuestionRequest | null>(null);
   // Tool-call internals (TodoWrite payloads, tool_result blobs, thinking
   // blocks) stay hidden by default — the user explicitly toggles them on
@@ -449,50 +451,28 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       onTokenUsage: (usage: { inputTokens: number; outputTokens: number }) =>
         setTokenUsage(usage),
       onTaskGone: () => {
-        // Task is no longer in the in-memory TaskRegistry (backend was
-        // restarted, workspace machine was off overnight, or the 30-min
-        // idle TTL evicted it). The SDK already wrote the FULL
-        // conversation to disk under `~/.claude/projects/<cwd>/`, so
-        // recover by pulling that transcript and rendering it — the
-        // user gets to see exactly what their unattended run produced
-        // instead of staring at a blank chat with a dead 404.
-        //
-        // Order matters:
-        //   1. Stop the active stream attempt (already done by the
-        //      streaming hook — it called onTaskGone then onDone).
-        //   2. Capture the sessionId BEFORE we clear taskId+seq, since
-        //      we'll need it for the disk lookup.
-        //   3. Soft-clear the stale taskId+seq so the NEXT prompt starts
-        //      a fresh task (no reattach attempt against the dead id).
-        //   4. Kick off the disk-restore in the background.
-        //   5. Show one of two system notes depending on whether the
-        //      restore actually found something to render.
+        // Task is no longer in the in-memory TaskRegistry — almost
+        // always because it completed while the tab was closed and the
+        // backend's completed-task TTL eventually evicted it (less
+        // commonly: backend restart, EC2 was powered off). The
+        // localStorage transcript already shows whatever the user last
+        // saw, and the SDK keeps the canonical transcript on disk under
+        // `~/.claude/projects/<cwd>/`, so we recover silently:
+        //   1. Clear the stale taskId+seq so the NEXT prompt starts a
+        //      fresh task (no reattach against the dead id).
+        //   2. Refresh the panel from disk if a sessionId is available
+        //      — this picks up anything the SDK wrote after the tab
+        //      closed without disturbing the visible state otherwise.
+        // No system banner: the previous wording ("workspace was
+        // offline, live task ended") was misleading in the common case
+        // (task completed cleanly) and just added noise.
         const stuckSessionId = stateRef.current.sessionId ?? "";
         setCurrentRequestId(null);
         setLastSeq(-1);
 
-        void (async () => {
-          const restored = stuckSessionId
-            ? await restoreFromDisk(stuckSessionId)
-            : false;
-          // eslint-disable-next-line no-console
-          console.info("[chat-panel] onTaskGone disk restore:", {
-            sessionId: stuckSessionId,
-            restored,
-          });
-          addMessage({
-            id: `sys_taskgone_${Date.now()}`,
-            type: "system",
-            content: restored
-              ? "Workspace was offline, so the live task ended — but I pulled " +
-                "the saved transcript from disk so you can see what ran. " +
-                "Send a new message to pick up where you left off."
-              : "Previous task ended (workspace was off or the server " +
-                "restarted) and no saved transcript was found. " +
-                "Send a new message to continue — your chat history is preserved.",
-            timestamp: Date.now(),
-          });
-        })();
+        if (stuckSessionId) {
+          void restoreFromDisk(stuckSessionId);
+        }
       },
       onTaskStarted: (taskId: string) => {
         // Server echos the requestId we generated, but call this anyway
@@ -1239,6 +1219,15 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
           <button
             type="button"
             className="chat-header-btn"
+            onClick={() => setShowWhatsAppModal(true)}
+            title="Link WhatsApp"
+            aria-label="Link WhatsApp"
+          >
+            <IconWhatsApp />
+          </button>
+          <button
+            type="button"
+            className="chat-header-btn"
             onClick={() => {
               setMessages([]);
               setSessionId("");
@@ -1278,6 +1267,11 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         request={askQuestion}
         onCancel={handleAskUserQuestionCancel}
         onSubmit={handleAskUserQuestionSubmit}
+      />
+
+      <WhatsAppLinkModal
+        open={showWhatsAppModal}
+        onClose={() => setShowWhatsAppModal(false)}
       />
 
       {showProjectPicker && onChangeProject && (
@@ -1406,6 +1400,23 @@ function IconTrash() {
         strokeWidth="1.2"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconWhatsApp() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M8 1.5a6.5 6.5 0 0 0-5.6 9.8L1.5 14.5l3.3-.85A6.5 6.5 0 1 0 8 1.5Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5.6 5.2c.15-.2.32-.2.45-.2h.34c.12 0 .28-.04.43.35.16.4.55 1.42.6 1.52.05.1.08.22 0 .35-.08.13-.12.2-.24.32-.12.13-.25.28-.36.37-.12.1-.24.2-.1.42.13.22.6.96 1.27 1.55.87.76 1.6 1 1.83 1.12.22.1.36.1.5-.06.13-.16.56-.65.7-.87.16-.22.3-.18.52-.1.22.08 1.42.67 1.66.79.24.12.4.18.47.28.06.1.06.6-.13 1.18-.2.58-1.15 1.1-1.63 1.18-.42.06-.94.1-1.51-.1-.35-.1-.79-.27-1.36-.5-2.4-.97-3.96-3.4-4.08-3.56-.12-.16-.97-1.3-.97-2.48 0-1.18.6-1.76.81-2Z"
+        fill="currentColor"
       />
     </svg>
   );

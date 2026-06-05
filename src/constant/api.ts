@@ -146,5 +146,22 @@ export function intentGuardUrl(id: string): string {
   return `${BACKEND_URL}/api/intent-guard/${id}`;
 }
 
+/* ────── WhatsApp integration ──────
+   These proxy through the backend (handlers/whatsapp.ts) to the Go
+   sidecar (ai-ide-whatsapp.service on 127.0.0.1:8091). Polling /qr
+   every couple seconds is how the modal stays current while the user
+   scans on their phone. */
+export function whatsappStatusUrl(): string {
+  return `${BACKEND_URL}/api/whatsapp/status`;
+}
+export function whatsappQrUrl(): string {
+  return `${BACKEND_URL}/api/whatsapp/qr`;
+}
+export function whatsappPairPhoneUrl(): string {
+  return `${BACKEND_URL}/api/whatsapp/pair-phone`;
+}
+export function whatsappUnlinkUrl(): string {
+  return `${BACKEND_URL}/api/whatsapp/unlink`;
+}
 
 export { BACKEND_URL };
