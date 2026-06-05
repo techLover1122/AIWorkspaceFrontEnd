@@ -524,6 +524,15 @@ export function WorkspaceShell({
     })();
   }, [workingDirectory, markUrlOpened, ensureBookmark]);
 
+  // When running inside the Electron desktop app, open popups as workspace
+  // tabs. The main process intercepts window.open() calls, routes them via
+  // IPC, and the preload delivers them here via window.__AIIDE__.onOpenTab.
+  useEffect(() => {
+    const aiide = (window as unknown as { __AIIDE__?: { onOpenTab?: (cb: (url: string, label: string) => void) => () => void } }).__AIIDE__;
+    if (!aiide?.onOpenTab) return;
+    return aiide.onOpenTab((url, label) => handleOpenTab(url, label));
+  }, [handleOpenTab]);
+
   // Restore previously open tabs on app load.
   const restoredRef = useRef(false);
   useEffect(() => {

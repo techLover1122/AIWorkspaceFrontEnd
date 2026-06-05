@@ -105,7 +105,14 @@ export function PreviewPane({
 }: PreviewPaneProps) {
   const tabCtx = useWorkspaceTab();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const webviewRef = useRef<HTMLElement>(null);
   const drawingsSvgRef = useRef<SVGSVGElement>(null);
+
+  // Read once at mount — the flag is set synchronously by desktop/preload.js
+  // before any script runs, so useState initializer is safe here.
+  const [isElectron] = useState(
+    () => typeof window !== 'undefined' && !!window.__AIIDE__?.isElectron
+  );
 
   // Mark the tab as loading the moment its URL changes (the iframe will
   // refetch) and clear it again on the next `load` event. Empty URL = the
@@ -122,6 +129,18 @@ export function PreviewPane({
     }
     onLoadingChangeRef.current?.(tabId, true);
   }, [tabId, url]);
+
+  // In Electron, <webview> fires 'did-finish-load' instead of the iframe onLoad.
+  useEffect(() => {
+    if (!isElectron) return;
+    const el = webviewRef.current;
+    if (!el) return;
+    const handler = () => onLoadingChangeRef.current?.(tabId, false);
+    el.addEventListener('did-finish-load', handler);
+    return () => el.removeEventListener('did-finish-load', handler);
+    // el is stable (same element across src changes); tabId changes rebind.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isElectron, tabId]);
   // Position of an in-flight comment that hasn't been committed yet — the
   // popover lives at this point until the user types and confirms, or
   // dismisses with Esc / empty submit.
@@ -144,7 +163,7 @@ export function PreviewPane({
   // catch the iframe re-creation on URL switch.
   useEffect(() => {
     onElementsReady?.({
-      iframe: iframeRef.current,
+      iframe: isElectron ? null : iframeRef.current,
       svg: drawingsSvgRef.current,
     });
   });
@@ -219,18 +238,28 @@ export function PreviewPane({
   return (
     <div className="preview-frame" style={hiddenStyle}>
       <div className="preview-content">
-        <iframe
-          className="preview-iframe"
-          src={url}
-          title="Preview"
-          loading="lazy"
-          ref={iframeRef}
-          onLoad={() => onLoadingChangeRef.current?.(tabId, false)}
-          // While a snapshot is being annotated, keep the iframe in the
-          // DOM (so unmounting doesn't lose its state) but invisible
-          // behind the static image.
-          style={snapshot ? { visibility: "hidden" } : undefined}
-        />
+        {isElectron ? (
+          <webview
+            ref={webviewRef}
+            src={url}
+            className="preview-iframe"
+            allowpopups=""
+            style={snapshot ? { visibility: "hidden" as const } : undefined}
+          />
+        ) : (
+          <iframe
+            className="preview-iframe"
+            src={url}
+            title="Preview"
+            loading="lazy"
+            ref={iframeRef}
+            onLoad={() => onLoadingChangeRef.current?.(tabId, false)}
+            // While a snapshot is being annotated, keep the iframe in the
+            // DOM (so unmounting doesn't lose its state) but invisible
+            // behind the static image.
+            style={snapshot ? { visibility: "hidden" } : undefined}
+          />
+        )}
 
         {/*
           Escape-hatch overlay: every iframe gets a tiny "open externally"

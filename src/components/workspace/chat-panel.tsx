@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AskUserQuestionRequest,
+  AnomalyAlert,
   ChatMessage,
   ChatRequest,
+  IntentGuardRequest,
   PermissionMode,
   PermissionRequest,
   ProjectInfo,
@@ -22,6 +24,8 @@ import {
 } from "../chat/ChatInput";
 import { PermissionInputPanel } from "../chat/PermissionInputPanel";
 import { PlanPermissionInputPanel } from "../chat/PlanPermissionInputPanel";
+import { IntentGuardPanel } from "../chat/IntentGuardPanel";
+import { AnomalyAlertBanner } from "../chat/AnomalyAlert";
 import { HistoryView } from "../chat/HistoryView";
 import { EnvironmentPackModal, type InstalledPack } from "../chat/EnvironmentPackModal";
 import { AskUserQuestionModal } from "../chat/AskUserQuestionModal";
@@ -211,6 +215,8 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   }, [permissionMode]);
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const [planRequest, setPlanRequest] = useState<PermissionRequest | null>(null);
+  const [intentGuardRequest, setIntentGuardRequest] = useState<IntentGuardRequest | null>(null);
+  const [anomalyAlert, setAnomalyAlert] = useState<AnomalyAlert | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
@@ -509,6 +515,12 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         } else {
           setPermissionRequest(req);
         }
+      },
+      onIntentGuardRequest: (req: IntentGuardRequest) => {
+        setIntentGuardRequest(req);
+      },
+      onAnomalyAlert: (alert: AnomalyAlert) => {
+        setAnomalyAlert(alert);
       },
       onPermissionResolved: (info: {
         id: string;
@@ -1289,6 +1301,13 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         showToolDetails={showToolDetails}
       />
 
+      {intentGuardRequest && (
+        <IntentGuardPanel
+          request={intentGuardRequest}
+          onResolved={() => setIntentGuardRequest(null)}
+        />
+      )}
+
       {permissionRequest && (
         <PermissionInputPanel
           request={permissionRequest}
@@ -1302,6 +1321,13 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
           onAcceptWithAutoEdits={handlePlanAcceptAuto}
           onAcceptManual={handlePlanAcceptManual}
           onKeepPlanning={handlePlanKeep}
+        />
+      )}
+
+      {anomalyAlert && (
+        <AnomalyAlertBanner
+          alert={anomalyAlert}
+          onDismiss={() => setAnomalyAlert(null)}
         />
       )}
 

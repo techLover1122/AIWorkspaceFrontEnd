@@ -9,6 +9,8 @@ import type {
   ChatRequest,
   PermissionRequest,
   StreamResponse,
+  IntentGuardRequest,
+  AnomalyAlert,
 } from "../types/types";
 
 type StreamingCallbacks = {
@@ -18,6 +20,10 @@ type StreamingCallbacks = {
   onSessionId: (id: string) => void;
   /** Structured permission ask from SDK canUseTool callback. */
   onPermissionRequest: (req: PermissionRequest) => void;
+  /** Intent Guard Agent: user's message is ambiguous — show clarification modal. */
+  onIntentGuardRequest?: (req: IntentGuardRequest) => void;
+  /** Anomaly Detection Agent: post-completion mismatch found. */
+  onAnomalyAlert?: (alert: AnomalyAlert) => void;
   /** Server-side resolution of a pending permission (5-min user-absent
    *  auto-allow timer fired, task aborted server-side, etc.). UI uses
    *  this to close any stale modal and show a soft note. */
@@ -619,6 +625,11 @@ async function processStreamResponse(
       // eslint-disable-next-line no-console
       console.log("[permission_request]", payload);
       callbacks.onFinalize();
+      const extendedPayload = parsed.data as typeof payload & {
+        toolGuardReason?: string;
+        toolGuardImpactCategory?: string;
+        toolGuardActionSummary?: string;
+      } | undefined;
       callbacks.onPermissionRequest({
         id: payload.id,
         toolName: payload.toolName,
@@ -631,6 +642,9 @@ async function processStreamResponse(
         decisionReason: payload.decisionReason,
         suggestions: payload.suggestions,
         isPlanMode: request.permissionMode === "plan",
+        toolGuardReason: extendedPayload?.toolGuardReason,
+        toolGuardImpactCategory: extendedPayload?.toolGuardImpactCategory,
+        toolGuardActionSummary: extendedPayload?.toolGuardActionSummary,
       });
       break;
     }
@@ -651,6 +665,29 @@ async function processStreamResponse(
       });
       break;
     }
+    case "intent_guard_request": {
+      // Intent Guard Agent: user's message is ambiguous. Show clarification
+      // modal BEFORE the SDK query starts. User picks narrow or broad option.
+      const igPayload = parsed.data as IntentGuardRequest | undefined;
+      if (!igPayload?.id) break;
+      // eslint-disable-next-line no-console
+      console.log("[intent_guard_request]", igPayload);
+      callbacks.onFinalize();
+      callbacks.onIntentGuardRequest?.(igPayload);
+      break;
+    }
+    case "intent_guard_resolved":
+      // Modal auto-resolved or user picked — no UI action needed.
+      break;
+    case "anomaly_alert": {
+      // Anomaly Detection Agent: post-completion mismatch. Show alert banner.
+      const alertPayload = parsed.data as AnomalyAlert | undefined;
+      if (!alertPayload) break;
+      // eslint-disable-next-line no-console
+      console.log("[anomaly_alert]", alertPayload);
+      callbacks.onAnomalyAlert?.(alertPayload);
+      break;
+    }
     case "done":
       callbacks.onFinalize();
       callbacks.onDone();
@@ -660,14 +697,9 @@ async function processStreamResponse(
       break;
     case "aborted":
       callbacks.onFinalize();
-      // Surface "aborted" as done so the chat panel can clear its
-      // in-flight state.
       callbacks.onDone();
       break;
     case "heartbeat":
-      // Wire-level keepalive — never reaches here because the wire
-      // reader filters them out before dispatch, but kept for type
-      // exhaustiveness.
       break;
   }
 }

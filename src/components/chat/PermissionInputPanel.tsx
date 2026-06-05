@@ -17,21 +17,26 @@ export function PermissionInputPanel({ request, onAllow, onDeny }: PermissionInp
     ref.current?.focus();
   }, []);
 
-  // Surface the tool name in the "always allow" button so the user knows
-  // they're whitelisting the whole tool for the session, not just this one
-  // specific invocation. The behavior backing it lives in chat-panel.tsx's
-  // handlePermissionAllow — it sends a broad `addRules` permission update
-  // with no ruleContent so any future call to this tool is auto-approved.
   const toolLabel = request.displayName ?? request.toolName;
-  const options = [
-    { label: "Allow once", key: "1", action: () => onAllow(false) },
-    {
-      label: `Always allow ${toolLabel} (this session)`,
-      key: "2",
-      action: () => onAllow(true),
-    },
-    { label: "Deny", key: "Esc", action: onDeny },
-  ];
+  const isToolGuard = Boolean(request.toolGuardReason);
+
+  // Tool Guard high-impact confirmation: no "always allow" — every high-impact
+  // action requires explicit one-time confirmation. Plain SDK gate keeps the
+  // session-allow option.
+  const options = isToolGuard
+    ? [
+        { label: "Haan, karo (Allow once)", key: "1", action: () => onAllow(false) },
+        { label: "Nahi, rok do (Deny)", key: "Esc", action: onDeny },
+      ]
+    : [
+        { label: "Allow once", key: "1", action: () => onAllow(false) },
+        {
+          label: `Always allow ${toolLabel} (this session)`,
+          key: "2",
+          action: () => onAllow(true),
+        },
+        { label: "Deny", key: "Esc", action: onDeny },
+      ];
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -63,7 +68,7 @@ export function PermissionInputPanel({ request, onAllow, onDeny }: PermissionInp
       : `Claude wants to use ${request.displayName ?? request.toolName}`);
 
   return (
-    <div className="permission-panel" ref={ref} tabIndex={0} onKeyDown={handleKey}>
+    <div className={`permission-panel ${isToolGuard ? "permission-panel--tool-guard" : ""}`} ref={ref} tabIndex={0} onKeyDown={handleKey}>
       <div className="permission-header">
         <span className="permission-icon" aria-hidden>
           <svg viewBox="0 0 16 16" fill="none">
@@ -76,8 +81,26 @@ export function PermissionInputPanel({ request, onAllow, onDeny }: PermissionInp
             />
           </svg>
         </span>
-        <span className="permission-title">Tool permission required</span>
+        <span className="permission-title">
+          {isToolGuard ? "High-Impact Action — Confirm" : "Tool permission required"}
+        </span>
       </div>
+
+      {isToolGuard && (
+        <div className="tool-guard-banner">
+          <span className="tool-guard-category">
+            {request.toolGuardImpactCategory === "inherently_high_impact"
+              ? "Financial / Legal / External"
+              : request.toolGuardImpactCategory === "mass_destructive"
+              ? "Bulk Destructive"
+              : request.toolGuardImpactCategory === "mass_write"
+              ? "Mass Write Operation"
+              : "Bulk External Action"}
+          </span>
+          <span className="tool-guard-reason">{request.toolGuardActionSummary}</span>
+        </div>
+      )}
+
       <div className="permission-detail">{title}</div>
       {request.description && (
         <div className="permission-description">{request.description}</div>

@@ -142,5 +142,9 @@ export function permissionDecisionUrl(id: string): string {
   return `${BACKEND_URL}/api/permission/${id}`;
 }
 
+export function intentGuardUrl(id: string): string {
+  return `${BACKEND_URL}/api/intent-guard/${id}`;
+}
+
 
 export { BACKEND_URL };

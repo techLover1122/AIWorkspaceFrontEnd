@@ -42,22 +42,42 @@ export type StreamResponse = {
     | "done"
     | "aborted"
     | "permission_request"
-    // Backend resolved a pending permission server-side (5-min user-
-    // absent auto-allow, task abort, etc.). Frontend uses this to close
-    // any stale modal opened by the original `permission_request`.
-    // data: { id, decision: "auto-allow" | "auto-deny", reason: string }.
     | "permission_resolved"
-    // Backend emits this each turn with cumulative token counts so the
-    // chat header's CompactRing can fill live without needing to poll
-    // a separate endpoint.
     | "token_usage"
-    // Backend emits this every ~15s while the SDK is busy or waiting on a
-    // permission decision. Frontend ignores it; its only purpose is to keep
-    // the HTTP stream's bytes flowing so proxies (Traefik / Cloudflare /
-    // nginx) don't close the connection during long idle stretches.
-    | "heartbeat";
+    | "heartbeat"
+    | "intent_guard_request"
+    | "intent_guard_resolved"
+    | "anomaly_alert";
   data?: unknown;
   error?: string;
+};
+
+export type IntentGuardOption = {
+  key: "narrow" | "broad";
+  label: string;
+  isLargeScale: boolean;
+  estimatedScope?: string;
+};
+
+export type IntentGuardRequest = {
+  id: string;
+  originalMessage: string;
+  question: string;
+  narrowOption: IntentGuardOption;
+  broadOption: IntentGuardOption;
+};
+
+export type AnomalyCheck = {
+  name: string;
+  status: "pass" | "warn" | "fail";
+  detail?: string;
+};
+
+export type AnomalyAlert = {
+  severity: "none" | "low" | "high";
+  summary: string;
+  checks: AnomalyCheck[];
+  capturedIntent?: string;
 };
 
 export type TokenUsage = {
@@ -128,6 +148,11 @@ export type PermissionRequest = {
   suggestions?: PermissionUpdate[];
   /** True when the surrounding session is in plan mode. */
   isPlanMode: boolean;
+  /** Tool Guard Agent enrichment — present when a high-impact tool triggered
+   *  the modal instead of (or in addition to) the SDK permission gate. */
+  toolGuardReason?: string;
+  toolGuardImpactCategory?: string;
+  toolGuardActionSummary?: string;
 };
 
 /* AskUserQuestion (Claude Code built-in tool) — shape mirrors the SDK. */
