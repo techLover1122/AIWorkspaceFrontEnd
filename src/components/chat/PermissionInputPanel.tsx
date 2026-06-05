@@ -25,8 +25,8 @@ export function PermissionInputPanel({ request, onAllow, onDeny }: PermissionInp
   // session-allow option.
   const options = isToolGuard
     ? [
-        { label: "Haan, karo (Allow once)", key: "1", action: () => onAllow(false) },
-        { label: "Nahi, rok do (Deny)", key: "Esc", action: onDeny },
+        { label: "Yes, proceed (Allow once)", key: "1", action: () => onAllow(false) },
+        { label: "No, stop (Deny)", key: "Esc", action: onDeny },
       ]
     : [
         { label: "Allow once", key: "1", action: () => onAllow(false) },
