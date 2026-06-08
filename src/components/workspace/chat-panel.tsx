@@ -31,6 +31,7 @@ import { EnvironmentPackModal, type InstalledPack } from "../chat/EnvironmentPac
 import { WhatsAppLinkModal } from "../chat/WhatsAppLinkModal";
 import { AskUserQuestionModal } from "../chat/AskUserQuestionModal";
 import { ConfirmDialog, type ConfirmRequest } from "../chat/ConfirmDialog";
+import { AccountUsageModal } from "../chat/AccountUsageModal";
 import { MiniBot } from "../chat/MiniBot";
 import { TypingIndicator } from "../chat/AnimatedAIBot";
 import { ConnectScreen } from "../chat/ConnectScreen";
@@ -223,6 +224,8 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [accountModalFocus, setAccountModalFocus] = useState<"account" | "usage">("account");
   const [askQuestion, setAskQuestion] = useState<AskUserQuestionRequest | null>(null);
   // Tool-call internals (TodoWrite payloads, tool_result blobs, thinking
   // blocks) stay hidden by default — the user explicitly toggles them on
@@ -1185,6 +1188,14 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
             void fetchAndShowPorts();
           }
           break;
+        case "account":
+          setAccountModalFocus("account");
+          setShowAccountModal(true);
+          break;
+        case "usage":
+          setAccountModalFocus("usage");
+          setShowAccountModal(true);
+          break;
         case "logout":
           // Clear chat state first so the user doesn't see stale messages
           // flash through behind the ConnectScreen during the auth wipe.
@@ -1409,6 +1420,21 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       {/* Themed confirm dialog — scoped to the chat panel so it overlays the
           panel (never occluded by the Electron tab views over the editor). */}
       <ConfirmDialog request={confirmRequest} onResolve={resolveConfirm} />
+
+      {/* /account + /usage panel — signed-in account and session token usage. */}
+      <AccountUsageModal
+        open={showAccountModal}
+        onClose={() => setShowAccountModal(false)}
+        focus={accountModalFocus}
+        connected={isConnected}
+        authMethod={connection.status === "connected" ? connection.authMethod ?? null : null}
+        apiKeyMasked={connection.status === "connected" ? connection.apiKeyMasked : null}
+        version={connection.status === "connected" ? connection.version : undefined}
+        workingDirectory={workingDirectory}
+        inputTokens={tokenUsage.inputTokens}
+        outputTokens={tokenUsage.outputTokens}
+        contextLimit={MODEL_CONTEXT_LIMIT}
+      />
     </aside>
   );
 }
