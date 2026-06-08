@@ -698,8 +698,8 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   // has fresh callbacks without recreating the EventSource.
   useEffect(() => {
     attachWhatsAppTaskRef.current = (taskId: string) => {
-      // Don't hijack an already-active local task.
-      if (stateRef.current.currentRequestId) return;
+      // Don't hijack a task that is actively streaming right now.
+      if (stateRef.current.isLoading) return;
       setLoading(true);
       setCurrentRequestId(taskId);
       const req = {
