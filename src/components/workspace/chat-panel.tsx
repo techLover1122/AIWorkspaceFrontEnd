@@ -30,6 +30,7 @@ import { HistoryView } from "../chat/HistoryView";
 import { EnvironmentPackModal, type InstalledPack } from "../chat/EnvironmentPackModal";
 import { WhatsAppLinkModal } from "../chat/WhatsAppLinkModal";
 import { AskUserQuestionModal } from "../chat/AskUserQuestionModal";
+import { ConfirmDialog, type ConfirmRequest } from "../chat/ConfirmDialog";
 import { MiniBot } from "../chat/MiniBot";
 import { TypingIndicator } from "../chat/AnimatedAIBot";
 import { ConnectScreen } from "../chat/ConnectScreen";
@@ -356,18 +357,38 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   // summary as context. Auto-compact is disabled in the backend
   // (settings.autoCompactEnabled = false), so this button is the only
   // way to compact — the user is in full control of WHEN it happens.
+  // Themed replacement for window.confirm() — see ConfirmDialog. `confirm`
+  // returns a promise that resolves when the user picks an option, so call
+  // sites can `await` it just like the native dialog's boolean.
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+  const confirmResolverRef = useRef<((ok: boolean) => void) | null>(null);
+  const confirm = useCallback((req: ConfirmRequest): Promise<boolean> => {
+    return new Promise<boolean>((resolve) => {
+      confirmResolverRef.current = resolve;
+      setConfirmRequest(req);
+    });
+  }, []);
+  const resolveConfirm = useCallback((ok: boolean) => {
+    setConfirmRequest(null);
+    const resolve = confirmResolverRef.current;
+    confirmResolverRef.current = null;
+    resolve?.(ok);
+  }, []);
+
   const [isCompacting, setIsCompacting] = useState(false);
-  const handleCompact = useCallback(() => {
+  const handleCompact = useCallback(async () => {
     if (isCompacting) return;
     if (state.isLoading) return;
     if (state.messages.length === 0) return;
-    const proceed = window.confirm(
-      "Compact the conversation?\n\n" +
+    const proceed = await confirm({
+      title: "Compact conversation",
+      message:
         "Claude will produce a structured summary of what we've discussed " +
         "so far and then start a fresh session that begins with that " +
         "summary. The full transcript stays in your history. Token usage " +
-        "should drop sharply afterwards."
-    );
+        "should drop sharply afterwards.",
+      confirmLabel: "Compact",
+    });
     if (!proceed) return;
     setIsCompacting(true);
     // We piggy-back the existing handleSend path so the user sees the
@@ -388,7 +409,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
     // assistant message even if a stream chunk arrived after we kicked off.
     pendingCompactRef.current = true;
     handleSendRef.current?.(summaryRequest, []);
-  }, [isCompacting, state.isLoading, state.messages.length]);
+  }, [isCompacting, state.isLoading, state.messages.length, confirm]);
 
   // Refs used by the compact handshake: pendingCompactRef tells onDone
   // "I'm waiting for a summary"; handleSendRef lets handleCompact reach
@@ -1232,11 +1253,15 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
           <button
             type="button"
             className="chat-header-btn"
-            onClick={() => {
+            onClick={async () => {
               if (state.messages.length === 0) return;
-              const ok = window.confirm(
-                "Delete the current chat history? This can't be undone."
-              );
+              const ok = await confirm({
+                title: "Delete chat history",
+                message:
+                  "Delete the current chat history? This can't be undone.",
+                confirmLabel: "Delete",
+                danger: true,
+              });
               if (!ok) return;
               setMessages([]);
               setSessionId("");
@@ -1380,6 +1405,10 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       />
         </>
       )}
+
+      {/* Themed confirm dialog — scoped to the chat panel so it overlays the
+          panel (never occluded by the Electron tab views over the editor). */}
+      <ConfirmDialog request={confirmRequest} onResolve={resolveConfirm} />
     </aside>
   );
 }
