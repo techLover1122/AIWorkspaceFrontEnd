@@ -10,8 +10,8 @@ const orbitron = Orbitron({
 });
 
 export const metadata: Metadata = {
-  title: "AI IDE Studio",
-  description: "A smooth Replit-inspired AI IDE interface built with Next.js.",
+  title: "AI Workspace",
+  description: "A smooth Replit-inspired AI workspace interface built with Next.js.",
 };
 
 export default function RootLayout({
