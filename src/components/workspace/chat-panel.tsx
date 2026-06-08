@@ -347,6 +347,10 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   }, []);
   const reattachedRef = useRef<string | null>(null);
 
+  // Stable ref so the SSE handler can attach a WhatsApp-originated task
+  // without the EventSource being recreated on every render.
+  const attachWhatsAppTaskRef = useRef<(taskId: string) => void>(() => {});
+
   // Manual compact: ask the AI to produce a structured summary of the
   // current conversation, then start a fresh session with just that
   // summary as context. Auto-compact is disabled in the backend
@@ -690,6 +694,25 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
     stateRef,
   ]);
 
+  // Keep attachWhatsAppTaskRef current so the SSE handler below always
+  // has fresh callbacks without recreating the EventSource.
+  useEffect(() => {
+    attachWhatsAppTaskRef.current = (taskId: string) => {
+      // Don't hijack an already-active local task.
+      if (stateRef.current.currentRequestId) return;
+      setLoading(true);
+      setCurrentRequestId(taskId);
+      const req = {
+        message: "",
+        requestId: taskId,
+        sessionId: stateRef.current.sessionId ?? undefined,
+        workingDirectory,
+        permissionMode,
+      };
+      void attachToTask(taskId, 0, req, streamCallbacks());
+    };
+  }, [workingDirectory, permissionMode, attachToTask, streamCallbacks, setLoading, setCurrentRequestId, stateRef]);
+
   const fetchAndShowPorts = useCallback(async () => {
     const placeholderId = `sys_${Date.now()}`;
     addMessage({
@@ -917,6 +940,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       try {
         const evt = JSON.parse(e.data) as
           | { type: "pack_installed"; name: string; slug: string; description: string; hasInstall: boolean; installedAt: string }
+          | { type: "task_started"; taskId: string; origin: string }
           | { type: string };
         if (evt.type === "pack_installed") {
           const p = evt as Extract<typeof evt, { type: "pack_installed" }>;
@@ -927,6 +951,11 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
             hasInstall: p.hasInstall,
             installedAt: p.installedAt,
           });
+        } else if (evt.type === "task_started") {
+          const t = evt as Extract<typeof evt, { type: "task_started" }>;
+          if (t.origin === "whatsapp") {
+            attachWhatsAppTaskRef.current(t.taskId);
+          }
         }
       } catch {
         // ignore malformed events
