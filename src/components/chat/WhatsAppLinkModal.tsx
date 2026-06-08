@@ -404,6 +404,7 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
                 </div>
               </div>
 
+              <div style={gridTwoColStyle}>
               {/* recipient */}
               <div style={cardStyle}>
                 <div style={cardLabelStyle}>Recipient</div>
@@ -464,6 +465,7 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
                     onChange={(next) => void handleToggleForwarding(next)}
                   />
                 </div>
+              </div>
               </div>
 
               {/* danger zone */}
@@ -532,7 +534,7 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
               </div>
 
               {tab === "qr" ? (
-                <div style={{ textAlign: "center" }}>
+                <div style={qrLayoutStyle}>
                   <div style={qrFrameStyle}>
                     {qr?.qrPngUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -550,16 +552,18 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
                       </div>
                     )}
                   </div>
-                  <div style={stepsStyle}>
-                    <Step n={1}>Open WhatsApp on your phone</Step>
-                    <Step n={2}>
-                      Tap <strong>Settings → Linked Devices → Link a Device</strong>
-                    </Step>
-                    <Step n={3}>Point your camera at this code</Step>
-                  </div>
-                  <div style={waitingRowStyle}>
-                    <span style={spinnerSmStyle} />
-                    Waiting for you to scan…
+                  <div style={qrSideStyle}>
+                    <div style={{ ...stepsStyle, marginTop: 0 }}>
+                      <Step n={1}>Open WhatsApp on your phone</Step>
+                      <Step n={2}>
+                        Tap <strong>Settings → Linked Devices → Link a Device</strong>
+                      </Step>
+                      <Step n={3}>Point your camera at this code</Step>
+                    </div>
+                    <div style={{ ...waitingRowStyle, justifyContent: "flex-start", marginTop: 14 }}>
+                      <span style={spinnerSmStyle} />
+                      Waiting for you to scan…
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -739,11 +743,20 @@ const modalStyle: CSSProperties = {
   background: SURFACE,
   color: "#f2f2f2",
   borderRadius: 18,
-  width: "min(420px, 96vw)",
+  width: "min(640px, 96vw)",
   maxHeight: "90vh",
   overflowY: "auto",
   border: `1px solid ${BORDER}`,
   boxShadow: "0 30px 80px rgba(0,0,0,0.6)",
+};
+
+/* Two-column grid for the connected-state cards so the modal grows wide
+ * instead of tall. Collapses to a single column on narrow viewports. */
+const gridTwoColStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+  gap: 12,
+  alignItems: "start",
 };
 
 const accentBarStyle: CSSProperties = {
@@ -1022,13 +1035,26 @@ const segActiveStyle: CSSProperties = {
   boxShadow: "0 1px 2px rgba(0,0,0,0.3)",
 };
 
+const qrLayoutStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 20,
+};
+
+const qrSideStyle: CSSProperties = {
+  flex: 1,
+  minWidth: 220,
+};
+
 const qrFrameStyle: CSSProperties = {
   display: "inline-block",
   padding: 12,
-  margin: "4px auto 0",
   background: "#fff",
   borderRadius: 14,
   boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+  flexShrink: 0,
 };
 
 const qrPlaceholderStyle: CSSProperties = {
