@@ -44,6 +44,37 @@ function hostFromUrl(url: string): string {
   }
 }
 
+/** Collapse-key for a bookmark: its base URL (scheme + host + port). Two
+ *  saved URLs that differ only by path / query / name share one key, so the
+ *  grid shows a single tile per service instead of one per visited page. */
+function baseUrlKey(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}`.toLowerCase();
+  } catch {
+    return url.trim().toLowerCase().replace(/\/+$/, "");
+  }
+}
+
+/** Pick the best representative among same-base bookmarks: prefer a custom
+ *  name, then a real icon, then the earliest-created (the original entry). */
+function dedupeByBase(urls: SavedUrl[]): SavedUrl[] {
+  const score = (s: SavedUrl) => (s.name ? 2 : 0) + (s.icon ? 1 : 0);
+  const byBase = new Map<string, SavedUrl>();
+  for (const u of urls) {
+    const key = baseUrlKey(u.url);
+    const cur = byBase.get(key);
+    if (
+      !cur ||
+      score(u) > score(cur) ||
+      (score(u) === score(cur) && u.created_at < cur.created_at)
+    ) {
+      byBase.set(key, u);
+    }
+  }
+  return Array.from(byBase.values());
+}
+
 function fallbackLetter(s: string): string {
   const c = s.replace(/^https?:\/\//, "").trim().charAt(0).toUpperCase();
   return c || "?";
@@ -95,14 +126,27 @@ export function NewTabPage({ codeServerUrl, onNavigate }: NewTabPageProps) {
     }
   }, [input, loadUrls]);
 
+  // Deleting the single tile shown for a base URL removes every saved row
+  // that shares that base — otherwise a hidden duplicate would just take its
+  // place on the next reload and the tile would look un-deletable.
   const handleDelete = useCallback(
-    async (id: number, e: React.MouseEvent) => {
+    async (rep: SavedUrl, e: React.MouseEvent) => {
       e.stopPropagation();
-      await fetch(urlByIdUrl(id), { method: "DELETE" });
-      setSaved((prev) => prev.filter((u) => u.id !== id));
+      const key = baseUrlKey(rep.url);
+      const victims = saved.filter((u) => baseUrlKey(u.url) === key);
+      setSaved((prev) => prev.filter((u) => baseUrlKey(u.url) !== key));
+      await Promise.all(
+        victims.map((u) =>
+          fetch(urlByIdUrl(u.id), { method: "DELETE" }).catch(() => {})
+        )
+      );
     },
-    []
+    [saved]
   );
+
+  // One tile per base URL — collapses the "same site opened at many paths"
+  // duplicates the user was seeing into a single bookmark.
+  const dedupedSaved = useMemo(() => dedupeByBase(saved), [saved]);
 
   const onIconError = useCallback((id: number) => {
     setIconErrors((s) => {
@@ -244,7 +288,7 @@ export function NewTabPage({ codeServerUrl, onNavigate }: NewTabPageProps) {
               <span className="ntp-bookmark-name">{tile.label}</span>
             </div>
           ))}
-          {saved.map((u) => {
+          {dedupedSaved.map((u) => {
             const displayName = u.name || hostFromUrl(u.url);
             const showImg = u.icon && !iconErrors.has(u.id);
             return (
@@ -265,7 +309,7 @@ export function NewTabPage({ codeServerUrl, onNavigate }: NewTabPageProps) {
                 <button
                   type="button"
                   className="ntp-bookmark-delete"
-                  onClick={(e) => handleDelete(u.id, e)}
+                  onClick={(e) => handleDelete(u, e)}
                   onMouseDown={(e) => e.stopPropagation()}
                   title="Remove"
                   aria-label="Delete bookmark"

@@ -571,11 +571,25 @@ export function WorkspaceShell({
       ensureBookmark(url, label);
       markUrlOpened(url, true);
 
+      // Match an already-open tab by base URL (scheme + host + port), not the
+      // exact string — opening the same service at a different path / query
+      // (e.g. Odoo /web vs /odoo) should focus the existing tab instead of
+      // stacking a near-duplicate. Falls back to a normalized string compare
+      // for non-URL schemes (aiide://terminal etc.).
+      const baseOf = (u: string) => {
+        try {
+          return new URL(u).origin.toLowerCase();
+        } catch {
+          return u.trim().toLowerCase().replace(/\/+$/, "");
+        }
+      };
+      const target = baseOf(url);
+
       // Look up an existing tab via the ref (always current), not via the
       // setTabs updater — the updater runs *after* the surrounding code, so
       // a value set inside it isn't yet readable by the setActiveTabId
       // call that follows.
-      const existing = tabsRef.current.find((t) => t.url === url);
+      const existing = tabsRef.current.find((t) => t.url && baseOf(t.url) === target);
       if (existing) {
         setActiveTabId(existing.id);
         return;
@@ -589,7 +603,7 @@ export function WorkspaceShell({
         // points at `newId`, but the cleanup is bounded — at worst the
         // user lands on the duplicate's id which doesn't exist, and
         // activeTab.find falls back to tabs[0]. Rare in practice.
-        if (currentTabs.some((t) => t.url === url)) return currentTabs;
+        if (currentTabs.some((t) => t.url && baseOf(t.url) === target)) return currentTabs;
         return [...currentTabs, { id: newId, label, url }];
       });
       setActiveTabId(newId);
