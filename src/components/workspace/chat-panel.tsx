@@ -349,7 +349,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
 
   // Stable ref so the SSE handler can attach a WhatsApp-originated task
   // without the EventSource being recreated on every render.
-  const attachWhatsAppTaskRef = useRef<(taskId: string) => void>(() => {});
+  const attachWhatsAppTaskRef = useRef<(taskId: string, userMessage?: string) => void>(() => {});
 
   // Manual compact: ask the AI to produce a structured summary of the
   // current conversation, then start a fresh session with just that
@@ -697,9 +697,15 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   // Keep attachWhatsAppTaskRef current so the SSE handler below always
   // has fresh callbacks without recreating the EventSource.
   useEffect(() => {
-    attachWhatsAppTaskRef.current = (taskId: string) => {
+    attachWhatsAppTaskRef.current = (taskId: string, userMessage?: string) => {
       // Don't hijack a task that is actively streaming right now.
       if (stateRef.current.isLoading) return;
+      // Render the user's WhatsApp prompt as a "you" bubble so the panel
+      // shows what was asked, not just the agent's reply. The task event
+      // stream only carries assistant/tool events, so without this the
+      // user's own message would never appear in the transcript.
+      const text = (userMessage ?? "").trim();
+      if (text) addMessage(createUserMessage(text));
       setLoading(true);
       setCurrentRequestId(taskId);
       const req = {
@@ -711,7 +717,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       };
       void attachToTask(taskId, 0, req, streamCallbacks());
     };
-  }, [workingDirectory, permissionMode, attachToTask, streamCallbacks, setLoading, setCurrentRequestId, stateRef]);
+  }, [workingDirectory, permissionMode, attachToTask, streamCallbacks, setLoading, setCurrentRequestId, stateRef, addMessage]);
 
   const fetchAndShowPorts = useCallback(async () => {
     const placeholderId = `sys_${Date.now()}`;
@@ -940,7 +946,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       try {
         const evt = JSON.parse(e.data) as
           | { type: "pack_installed"; name: string; slug: string; description: string; hasInstall: boolean; installedAt: string }
-          | { type: "task_started"; taskId: string; origin: string }
+          | { type: "task_started"; taskId: string; origin: string; userMessage?: string }
           | { type: string };
         if (evt.type === "pack_installed") {
           const p = evt as Extract<typeof evt, { type: "pack_installed" }>;
@@ -954,7 +960,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         } else if (evt.type === "task_started") {
           const t = evt as Extract<typeof evt, { type: "task_started" }>;
           if (t.origin === "whatsapp") {
-            attachWhatsAppTaskRef.current(t.taskId);
+            attachWhatsAppTaskRef.current(t.taskId, t.userMessage);
           }
         }
       } catch {
@@ -1436,17 +1442,8 @@ function IconTrash() {
 
 function IconWhatsApp() {
   return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M8 1.5a6.5 6.5 0 0 0-5.6 9.8L1.5 14.5l3.3-.85A6.5 6.5 0 1 0 8 1.5Z"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M5.6 5.2c.15-.2.32-.2.45-.2h.34c.12 0 .28-.04.43.35.16.4.55 1.42.6 1.52.05.1.08.22 0 .35-.08.13-.12.2-.24.32-.12.13-.25.28-.36.37-.12.1-.24.2-.1.42.13.22.6.96 1.27 1.55.87.76 1.6 1 1.83 1.12.22.1.36.1.5-.06.13-.16.56-.65.7-.87.16-.22.3-.18.52-.1.22.08 1.42.67 1.66.79.24.12.4.18.47.28.06.1.06.6-.13 1.18-.2.58-1.15 1.1-1.63 1.18-.42.06-.94.1-1.51-.1-.35-.1-.79-.27-1.36-.5-2.4-.97-3.96-3.4-4.08-3.56-.12-.16-.97-1.3-.97-2.48 0-1.18.6-1.76.81-2Z"
-        fill="currentColor"
-      />
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.885-9.885 9.885M20.52 3.449C18.24 1.245 15.24 0 12.045 0 5.463 0 .104 5.359.101 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.582 0 11.94-5.359 11.943-11.893a11.821 11.821 0 00-3.495-8.453z" />
     </svg>
   );
 }
