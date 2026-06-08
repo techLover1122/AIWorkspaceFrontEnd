@@ -67,6 +67,7 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
   const [recipientNote, setRecipientNote] = useState<string | null>(null);
   const [forwardingEnabled, setForwardingEnabled] = useState<boolean | null>(null);
   const [forwardingBusy, setForwardingBusy] = useState(false);
+  const [unlinkConfirm, setUnlinkConfirm] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Reset when the modal closes so the next open starts clean.
@@ -83,6 +84,7 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
     setRecipientNote(null);
     setForwardingEnabled(null);
     setForwardingBusy(false);
+    setUnlinkConfirm(false);
   }, [open]);
 
   // Fetch the forwarding toggle state on open. The backend stores it
@@ -284,10 +286,11 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
   };
 
   const handleUnlink = async () => {
-    const ok = window.confirm(
-      "Unlink WhatsApp? You'll need to re-scan the QR or re-pair to receive notifications again."
-    );
-    if (!ok) return;
+    if (!unlinkConfirm) {
+      setUnlinkConfirm(true);
+      return;
+    }
+    setUnlinkConfirm(false);
     setBusy(true);
     try {
       await fetch(whatsappUnlinkUrl(), { method: "POST" });
@@ -433,14 +436,35 @@ export function WhatsAppLinkModal({ open, onClose }: Props) {
               </label>
             </div>
 
-            <button
-              type="button"
-              onClick={handleUnlink}
-              disabled={busy}
-              style={dangerBtnStyle}
-            >
-              {busy ? "Unlinking…" : "Unlink"}
-            </button>
+            {unlinkConfirm ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 13, color: "#e88" }}>Sure? This removes the linked device.</span>
+                <button
+                  type="button"
+                  onClick={handleUnlink}
+                  disabled={busy}
+                  style={dangerBtnStyle}
+                >
+                  {busy ? "Unlinking…" : "Yes, unlink"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUnlinkConfirm(false)}
+                  style={subtleBtnStyle}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleUnlink}
+                disabled={busy}
+                style={dangerBtnStyle}
+              >
+                Unlink
+              </button>
+            )}
           </div>
         ) : (
           <div style={bodyStyle}>

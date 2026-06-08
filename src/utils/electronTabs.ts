@@ -31,6 +31,8 @@ export type ElectronTabs = {
 };
 
 type AIIDEGlobal = {
+  readonly isElectron?: boolean;
+  readonly electronVersion?: string;
   tab?: ElectronTabs;
   onOpenTab?: (cb: (url: string, label: string) => void) => () => void;
   tunnel?: import("./electronTunnel").ElectronTunnel;
