@@ -822,7 +822,13 @@ export function WorkspaceShell({
                 the content area gets occluded by the view (composited above
                 the renderer), so floating-over-iframe positioning no longer
                 works. Putting the toolbar in chrome keeps it visible. */}
-            {activeTab.url && !isCapturing && (
+            {/* Always render the toolbar row (except mid-capture) so its 36px
+                height never collapses — switching to the URL-less "New Tab"
+                page used to drop the whole row, which made the tools vanish
+                and shifted the entire editor up. Annotation tools stay gated
+                behind showAnnotationTools, so the blank page just shows the
+                reload + hide controls instead of disappearing. */}
+            {!isCapturing && (
               <EditorOverlayToolbar
                 visible={toolbarVisible}
                 onToggleVisible={toggleToolbarVisible}

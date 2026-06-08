@@ -60,6 +60,43 @@
   box-sizing: border-box;
 }
 
+/* ===== Global themed scrollbars =====
+   One consistent dark scrollbar for every scrollable surface (chat list,
+   WhatsApp modal, history/project lists, code blocks, etc.). Per-class
+   rules below may still override width, but they all share this palette.
+   Firefox uses scrollbar-color; Chromium/Electron uses ::-webkit-scrollbar. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #424242 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 5px;
+  /* Transparent border + padding-box clip insets the thumb so it reads the
+     same on any background without hard-coding the surrounding surface color. */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #4e4e4e;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 html,
 body {
   margin: 0;
@@ -238,13 +275,17 @@ button {
   color: var(--vsc-text-emphasis);
 }
 
+/* Selected toolbar tool — filled with the AI-bot accent so "active tool"
+   matches the active-tab language across the chrome. */
 .overlay-toolbar-btn.active {
-  background: rgba(167, 139, 250, 0.18);
+  background: var(--bot-accent-soft);
   color: var(--bot-accent, #a78bfa);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bot-accent) 55%, transparent);
 }
 
 .overlay-toolbar-btn.active:hover {
-  background: rgba(167, 139, 250, 0.28);
+  background: color-mix(in srgb, var(--bot-accent) 32%, transparent);
+  color: var(--vsc-text-emphasis);
 }
 
 .overlay-toolbar-send {
@@ -312,8 +353,8 @@ button {
 .editor-tab {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 12px;
+  gap: 7px;
+  padding: 0 8px 0 12px;
   background: var(--vsc-tab-inactive);
   color: var(--vsc-text-muted);
   border: 0;
@@ -324,19 +365,46 @@ button {
   position: relative;
   cursor: pointer;
   overflow: hidden;
+  transition: background 140ms ease, color 140ms ease;
   --tab-sweep-color: var(--bot-accent);
 }
 
+/* Idle hover — gentle lift so tabs feel responsive before selection. */
+.editor-tab:not(.active):hover {
+  background: var(--vsc-hover);
+  color: var(--vsc-text);
+}
+
 .editor-tab.active {
-  background: var(--vsc-tab-active);
+  /* AI-bot themed active surface — a soft purple tint over the editor bg so
+     the selected tab reads as "the bot's context" without a garish fill. */
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-accent) 26%, var(--vsc-bg)),
+      color-mix(in srgb, var(--bot-accent) 12%, var(--vsc-bg))
+    );
   color: var(--vsc-text-emphasis);
-  /* 3-side border (top, left, right) — no bottom so the tab visually "opens"
-     into the editor area below. Inset shadows instead of `border` so the
-     tab's intrinsic size doesn't shift on activation. */
+  /* Bot-accent top bar + side borders; no bottom so the tab "opens" into the
+     editor. Inset shadows instead of border so size doesn't shift on activate. */
   box-shadow:
-    inset 0 1px 0 var(--vsc-border-strong),
-    inset 1px 0 0 var(--vsc-border-strong),
-    inset -1px 0 0 var(--vsc-border-strong);
+    inset 0 2px 0 var(--bot-accent),
+    inset 1px 0 0 color-mix(in srgb, var(--bot-accent) 40%, var(--vsc-border-strong)),
+    inset -1px 0 0 color-mix(in srgb, var(--bot-accent) 40%, var(--vsc-border-strong));
+}
+
+/* Active-tab left icon — the AI-bot mascot head (antenna + eyes), matching
+   MiniBot. Only the active tab renders it, so it doubles as the "this is
+   selected" cue. Eyes are punched out via evenodd so they read as a face. */
+.editor-tab.active::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  background-color: var(--bot-accent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M8 6H16a4 4 0 0 1 4 4V15a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4ZM10.5 2.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0ZM11.3 4H12.7V6H11.3ZM7.6 12a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0ZM13 12a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M8 6H16a4 4 0 0 1 4 4V15a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4ZM10.5 2.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0ZM11.3 4H12.7V6H11.3ZM7.6 12a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0ZM13 12a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  filter: drop-shadow(0 0 3px var(--bot-accent-glow));
 }
 
 /* Grouped active tab keeps the group color strip on top and adds side borders. */
@@ -420,33 +488,47 @@ button {
   height: 12px;
 }
 
+/* Close affordance appears on hover (or keyboard focus) only — the active
+   tab no longer keeps it pinned, matching modern browser tab behavior. */
 .editor-tab:hover .tab-close,
-.editor-tab.active .tab-close {
+.editor-tab:focus-within .tab-close {
   opacity: 1;
 }
 
 .tab-close:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--vsc-text-emphasis);
+  background: color-mix(in srgb, var(--vsc-error) 22%, transparent);
+  color: var(--vsc-error);
 }
 
 .tab-add {
-  width: 35px;
-  height: 35px;
+  width: 28px;
+  height: 28px;
+  margin: 0 4px;
+  align-self: center;
   border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--vsc-text-muted);
-  font-size: 16px;
-  line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.tab-add svg {
+  width: 15px;
+  height: 15px;
 }
 
 .tab-add:hover {
-  background: var(--vsc-hover);
-  color: var(--vsc-text-emphasis);
+  background: var(--bot-accent-soft);
+  color: var(--bot-accent);
+  transform: scale(1.08);
+}
+
+.tab-add:active {
+  transform: scale(0.94);
 }
 
 /* ===== Tab group chip ===== */
@@ -1399,6 +1481,9 @@ button {
 }
 
 /* ===== Mini bot (inline, ~24px) ===== */
+
+/* WhatsApp modal QR spinner */
+@keyframes wa-spin { to { transform: rotate(360deg); } }
 
 .mini-bot {
   position: relative;
