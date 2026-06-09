@@ -188,9 +188,29 @@ type ChatPanelProps = {
    *  into the composer — e.g. the annotation-snapshot Send button drops a
    *  composited PNG here. */
   chatInputRef?: React.Ref<ChatInputHandle>;
+  /** Multi-session: namespaces this panel's persisted chat (localStorage)
+   *  so several sessions can share one working directory without clobbering
+   *  each other. Undefined = the legacy single-session namespace, so the
+   *  pre-existing chat shows up as the first session. */
+  sessionKey?: string;
+  /** Whether this panel is the visible/active session. Inactive panels stay
+   *  mounted (so their server task keeps streaming live in the background),
+   *  but they must NOT react to global side-effect events (pack-install
+   *  notifications, WhatsApp task hijacks) — only the active one does. */
+  active?: boolean;
+  /** Reports this session's in-flight state up to the session tab strip so
+   *  it can show a "running" dot on background tabs. */
+  onLoadingChange?: (loading: boolean) => void;
 };
 
-export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: externalChatInputRef }: ChatPanelProps) {
+export function ChatPanel({
+  workingDirectory,
+  onChangeProject,
+  chatInputRef: externalChatInputRef,
+  sessionKey,
+  active = true,
+  onLoadingChange,
+}: ChatPanelProps) {
   const tabCtx = useWorkspaceTab();
   const {
     state,
@@ -204,7 +224,23 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
     resetSeqCursor,
     setMessages,
     stateRef,
-  } = useChatState(workingDirectory);
+  } = useChatState(workingDirectory, sessionKey);
+
+  // localStorage scope for the "last active session per cwd" memory. With
+  // multi-session, several panels share one working directory, so the
+  // last-session lookup is namespaced by sessionKey too. The REAL
+  // workingDirectory is still used for backend project lookups below.
+  const persistCwd =
+    sessionKey && workingDirectory ? `${workingDirectory}::${sessionKey}` : workingDirectory;
+
+  // Report in-flight state up to the session tab strip (for the running
+  // dot). Routed through a ref so a changing parent callback identity can't
+  // turn this into a render loop — it fires only when isLoading flips.
+  const onLoadingChangeRef = useRef(onLoadingChange);
+  onLoadingChangeRef.current = onLoadingChange;
+  useEffect(() => {
+    onLoadingChangeRef.current?.(state.isLoading);
+  }, [state.isLoading]);
   const { send, attachToTask, abort } = useClaudeStreaming();
 
   // Default to bypassPermissions so the user isn't prompted "Allow / Allow"
@@ -227,6 +263,13 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [accountModalFocus, setAccountModalFocus] = useState<"account" | "usage">("account");
   const [askQuestion, setAskQuestion] = useState<AskUserQuestionRequest | null>(null);
+  // Prompt queue: messages the user submitted while a turn was already in
+  // flight. They auto-drain one at a time as each turn finishes (see the
+  // drain effect below). Each carries its own attachments so a queued
+  // message keeps any images that were attached when it was composed.
+  const [queue, setQueue] = useState<
+    { id: string; message: string; attachments: Attachment[] }[]
+  >([]);
   // Tool-call internals (TodoWrite payloads, tool_result blobs, thinking
   // blocks) stay hidden by default — the user explicitly toggles them on
   // via the eye icon in the composer when they want to debug a turn.
@@ -269,8 +312,8 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   // keyed by working directory. Empty/null is intentional — we only
   // record real sessions, and explicit clears call forgetLastSession.
   useEffect(() => {
-    if (state.sessionId) rememberLastSession(workingDirectory, state.sessionId);
-  }, [state.sessionId, workingDirectory]);
+    if (state.sessionId) rememberLastSession(persistCwd, state.sessionId);
+  }, [state.sessionId, persistCwd]);
 
   // Restore the last active chat for this cwd on first connect.
   // Guarded by restoredForRef so the setMessages/setSessionId calls
@@ -283,11 +326,11 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   // turn's tool calls — not historical ones from earlier in the chat.
   const turnStartIndexRef = useRef(0);
   useEffect(() => {
-    if (!isConnected || !workingDirectory) return;
-    if (restoredForRef.current === workingDirectory) return;
-    restoredForRef.current = workingDirectory;
+    if (!isConnected || !workingDirectory || !persistCwd) return;
+    if (restoredForRef.current === persistCwd) return;
+    restoredForRef.current = persistCwd;
 
-    const lastSessionId = loadLastSessionMap()[workingDirectory];
+    const lastSessionId = loadLastSessionMap()[persistCwd];
     if (!lastSessionId) return;
     if (stateRef.current.sessionId || stateRef.current.messages.length > 0) return;
 
@@ -303,7 +346,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         );
         if (!project) {
           // Backend no longer knows this project — stale entry, drop it.
-          forgetLastSession(workingDirectory);
+          forgetLastSession(persistCwd);
           return;
         }
         const convRes = await fetch(
@@ -312,7 +355,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         if (!convRes.ok) {
           // 404 means the on-disk transcript is gone (deleted/rotated);
           // anything else is transient and worth keeping for next try.
-          if (convRes.status === 404) forgetLastSession(workingDirectory);
+          if (convRes.status === 404) forgetLastSession(persistCwd);
           return;
         }
         const convData: { messages?: unknown[] } = await convRes.json();
@@ -333,7 +376,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
     return () => {
       cancelled = true;
     };
-  }, [isConnected, workingDirectory, setSessionId, setMessages, stateRef]);
+  }, [isConnected, workingDirectory, persistCwd, setSessionId, setMessages, stateRef]);
 
   const handleReuseMessage = useCallback((text: string) => {
     chatInputRef.current?.setDraft(text);
@@ -422,6 +465,9 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   const handleSendRef = useRef<((message: string, attachments: Attachment[]) => void) | null>(null);
 
   const handleStop = useCallback(() => {
+    // Stop means halt: cancel the in-flight turn AND drop anything still
+    // queued, so the drain effect doesn't immediately fire the next one.
+    setQueue([]);
     if (state.currentRequestId) {
       abort(state.currentRequestId);
       setLoading(false);
@@ -621,7 +667,8 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
               : []
           );
           setSessionId("");
-          forgetLastSession(workingDirectory);
+          forgetLastSession(persistCwd);
+          setQueue([]);
           setTokenUsage({ inputTokens: 0, outputTokens: 0 });
           setIsCompacting(false);
           return;
@@ -656,7 +703,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         setCurrentRequestId(null);
       },
     }),
-    [addMessage, appendToLastMessage, finalizeLastMessage, setSessionId, setLoading, setCurrentRequestId, setLastSeq, state.currentRequestId, abort, stateRef, tabCtx, workingDirectory, setMessages, restoreFromDisk]
+    [addMessage, appendToLastMessage, finalizeLastMessage, setSessionId, setLoading, setCurrentRequestId, setLastSeq, state.currentRequestId, abort, stateRef, tabCtx, workingDirectory, persistCwd, setMessages, restoreFromDisk]
   );
 
   /* ------------------------------------------------------------------
@@ -785,10 +832,8 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
     }
   }, [addMessage]);
 
-  const handleSend = useCallback(
+  const runSend = useCallback(
     (message: string, attachments: Attachment[]) => {
-      if (state.isLoading) return;
-
       const imageAttachments = attachments.filter((a) => a.kind === "image");
       const otherAttachments = attachments.filter((a) => a.kind !== "image");
 
@@ -857,7 +902,6 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       })();
     },
     [
-      state.isLoading,
       state.sessionId,
       workingDirectory,
       permissionMode,
@@ -870,6 +914,63 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       stateRef,
     ]
   );
+
+  // Public send entry point. If a turn is already in flight, the message is
+  // queued instead of dropped (the old behavior was a silent `return`); the
+  // drain effect below sends it as soon as the current turn — and any
+  // earlier queued messages — finish. Otherwise it sends immediately.
+  const handleSend = useCallback(
+    (message: string, attachments: Attachment[]) => {
+      const hasContent = message.trim().length > 0 || attachments.length > 0;
+      if (!hasContent) return;
+      if (stateRef.current.isLoading) {
+        setQueue((q) => [
+          ...q,
+          {
+            id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            message,
+            attachments,
+          },
+        ]);
+        return;
+      }
+      runSend(message, attachments);
+    },
+    [runSend, stateRef]
+  );
+
+  const cancelQueued = useCallback((id: string) => {
+    setQueue((q) => q.filter((item) => item.id !== id));
+  }, []);
+
+  // Drain the queue: when the panel goes idle (and no modal is blocking),
+  // pop the next queued prompt and send it. Guarded against the compact
+  // handshake and any open permission/question modal so a queued message
+  // never races ahead of a decision the user still owes.
+  useEffect(() => {
+    if (state.isLoading) return;
+    if (queue.length === 0) return;
+    if (
+      askQuestion ||
+      permissionRequest ||
+      planRequest ||
+      isCompacting ||
+      pendingCompactRef.current
+    ) {
+      return;
+    }
+    const next = queue[0];
+    setQueue((q) => q.slice(1));
+    runSend(next.message, next.attachments);
+  }, [
+    state.isLoading,
+    queue,
+    askQuestion,
+    permissionRequest,
+    planRequest,
+    isCompacting,
+    runSend,
+  ]);
 
   // Expose handleSend through a ref so handleCompact (defined earlier
   // for ordering) can invoke it. Re-pointed on each handleSend
@@ -965,6 +1066,11 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
   // The modal also calls handlePackInstalled directly for immediate UX,
   // but the de-dup map above prevents a double-message.
   useEffect(() => {
+    // Only the active session reacts to global side-effect events. Inactive
+    // panels stay mounted (their server task keeps streaming), but a single
+    // pack-install / WhatsApp event must trigger exactly one panel — the one
+    // the user is looking at — not N duplicate notifications/hijacks.
+    if (!active) return;
     const es = new EventSource(eventsUrl());
     es.onmessage = (e) => {
       try {
@@ -992,7 +1098,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       }
     };
     return () => es.close();
-  }, [handlePackInstalled]);
+  }, [handlePackInstalled, active]);
 
   const toggleMode = useCallback(() => {
     setPermissionMode((prev) =>
@@ -1170,9 +1276,10 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
         case "clear":
           setMessages([]);
           setSessionId("");
-          forgetLastSession(workingDirectory);
+          forgetLastSession(persistCwd);
           setPermissionRequest(null);
           setPlanRequest(null);
+          setQueue([]);
           setTokenUsage({ inputTokens: 0, outputTokens: 0 });
           break;
         case "history":
@@ -1201,9 +1308,10 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
           // flash through behind the ConnectScreen during the auth wipe.
           setMessages([]);
           setSessionId("");
-          forgetLastSession(workingDirectory);
+          forgetLastSession(persistCwd);
           setPermissionRequest(null);
           setPlanRequest(null);
+          setQueue([]);
           setTokenUsage({ inputTokens: 0, outputTokens: 0 });
           void connection.disconnect();
           break;
@@ -1220,6 +1328,7 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       tabCtx,
       connection,
       workingDirectory,
+      persistCwd,
     ]
   );
 
@@ -1276,9 +1385,10 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
               if (!ok) return;
               setMessages([]);
               setSessionId("");
-              forgetLastSession(workingDirectory);
+              forgetLastSession(persistCwd);
               setPermissionRequest(null);
               setPlanRequest(null);
+              setQueue([]);
               setTokenUsage({ inputTokens: 0, outputTokens: 0 });
             }}
             disabled={state.messages.length === 0}
@@ -1302,7 +1412,8 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
             onClick={() => {
               setMessages([]);
               setSessionId("");
-              forgetLastSession(workingDirectory);
+              forgetLastSession(persistCwd);
+              setQueue([]);
               setTokenUsage({ inputTokens: 0, outputTokens: 0 });
             }}
             title="New chat"
@@ -1399,6 +1510,43 @@ export function ChatPanel({ workingDirectory, onChangeProject, chatInputRef: ext
       {state.isLoading && (
         <div className="typing-bar">
           <TypingIndicator messages={state.messages} />
+        </div>
+      )}
+
+      {queue.length > 0 && (
+        <div className="chat-queue" aria-label="Queued messages">
+          <span className="chat-queue-label">
+            Queued · auto-sends next ({queue.length})
+          </span>
+          {queue.map((item, i) => (
+            <div className="chat-queue-item" key={item.id}>
+              <span className="chat-queue-num">{i + 1}</span>
+              <span className="chat-queue-text" title={item.message}>
+                {item.message.trim() ||
+                  (item.attachments.length > 0
+                    ? `[${item.attachments.length} attachment${
+                        item.attachments.length === 1 ? "" : "s"
+                      }]`
+                    : "(empty)")}
+              </span>
+              <button
+                type="button"
+                className="chat-queue-cancel"
+                onClick={() => cancelQueued(item.id)}
+                title="Remove from queue"
+                aria-label="Remove queued message"
+              >
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <path
+                    d="M4 4l8 8M12 4l-8 8"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          ))}
         </div>
       )}
 

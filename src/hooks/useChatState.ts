@@ -72,16 +72,24 @@ type PersistedSnapshot = {
   lastSeq: number;
 };
 
-function storageKey(workingDirectory?: string | null): string {
-  return `${STORAGE_PREFIX}::${workingDirectory ?? "__default__"}`;
+function storageKey(
+  workingDirectory?: string | null,
+  sessionKey?: string | null
+): string {
+  const base = `${STORAGE_PREFIX}::${workingDirectory ?? "__default__"}`;
+  // No sessionKey → legacy single-session key (preserves chats saved before
+  // multi-session). A sessionKey suffixes the namespace so each tab keeps an
+  // independent transcript under the same working directory.
+  return sessionKey ? `${base}::${sessionKey}` : base;
 }
 
 function readPersisted(
-  workingDirectory?: string | null
+  workingDirectory?: string | null,
+  sessionKey?: string | null
 ): PersistedSnapshot | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(storageKey(workingDirectory));
+    const raw = window.localStorage.getItem(storageKey(workingDirectory, sessionKey));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedSnapshot;
     if (!parsed || !Array.isArray(parsed.messages)) return null;
@@ -98,12 +106,13 @@ function readPersisted(
 
 function writePersisted(
   workingDirectory: string | undefined | null,
+  sessionKey: string | undefined | null,
   snapshot: PersistedSnapshot
 ): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(
-      storageKey(workingDirectory),
+      storageKey(workingDirectory, sessionKey),
       JSON.stringify(snapshot)
     );
   } catch {
@@ -111,10 +120,13 @@ function writePersisted(
   }
 }
 
-function clearPersisted(workingDirectory?: string | null): void {
+function clearPersisted(
+  workingDirectory?: string | null,
+  sessionKey?: string | null
+): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(storageKey(workingDirectory));
+    window.localStorage.removeItem(storageKey(workingDirectory, sessionKey));
   } catch {
     /* ignore */
   }
@@ -131,11 +143,14 @@ function clearPersisted(workingDirectory?: string | null): void {
  * conversation. The persisted snapshot also carries the active server
  * `taskId` + `lastSeq` so a page reload can reattach to in-flight work.
  */
-export function useChatState(workingDirectory?: string | null) {
+export function useChatState(
+  workingDirectory?: string | null,
+  sessionKey?: string | null
+) {
   // Hydrate synchronously on first mount so the chat panel doesn't
   // flicker through "empty" before the persisted snapshot loads.
   const [state, setState] = useState<ChatState>(() => {
-    const persisted = readPersisted(workingDirectory);
+    const persisted = readPersisted(workingDirectory, sessionKey);
     return {
       messages: persisted?.messages ?? [],
       sessionId: persisted?.sessionId ?? null,
@@ -227,7 +242,7 @@ export function useChatState(workingDirectory?: string | null) {
       cancelRaf(rafIdRef.current);
       rafIdRef.current = null;
     }
-    const persisted = readPersisted(workingDirectory);
+    const persisted = readPersisted(workingDirectory, sessionKey);
     setState({
       messages: persisted?.messages ?? [],
       sessionId: persisted?.sessionId ?? null,
@@ -235,13 +250,13 @@ export function useChatState(workingDirectory?: string | null) {
       currentRequestId: persisted?.taskId ?? null,
       lastSeq: persisted?.lastSeq ?? -1,
     });
-  }, [workingDirectory]);
+  }, [workingDirectory, sessionKey]);
 
   // Persist on any meaningful state change. `isLoading` isn't persisted —
   // it gets re-derived when the chat panel decides whether to reattach
   // to the stored taskId on mount.
   useEffect(() => {
-    writePersisted(workingDirectory, {
+    writePersisted(workingDirectory, sessionKey, {
       messages: state.messages,
       sessionId: state.sessionId,
       taskId: state.currentRequestId,
@@ -249,6 +264,7 @@ export function useChatState(workingDirectory?: string | null) {
     });
   }, [
     workingDirectory,
+    sessionKey,
     state.messages,
     state.sessionId,
     state.currentRequestId,
@@ -364,8 +380,8 @@ export function useChatState(workingDirectory?: string | null) {
       currentRequestId: null,
       lastSeq: -1,
     });
-    clearPersisted(workingDirectory);
-  }, [workingDirectory]);
+    clearPersisted(workingDirectory, sessionKey);
+  }, [workingDirectory, sessionKey]);
 
   return {
     state,

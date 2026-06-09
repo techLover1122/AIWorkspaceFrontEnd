@@ -290,12 +290,14 @@ const ChatInputImpl = forwardRef<ChatInputHandle, ChatInputProps>(function ChatI
       return;
     }
     const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || isLoading) return;
+    // NB: sending is allowed while a turn is in flight — the parent queues
+    // the message instead of dropping it. Only empties are rejected here.
+    if (!trimmed && attachments.length === 0) return;
     onSend(trimmed, attachments);
     setText("");
     setAttachments([]);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [slashOpen, filteredSlash, slashIndex, runSlash, text, attachments, isLoading, onSend]);
+  }, [slashOpen, filteredSlash, slashIndex, runSlash, text, attachments, onSend]);
 
   /* --- Keyboard --- */
 
@@ -348,7 +350,9 @@ const ChatInputImpl = forwardRef<ChatInputHandle, ChatInputProps>(function ChatI
     textareaRef.current?.focus();
   };
 
-  const canSend = (!!text.trim() || attachments.length > 0) && !isLoading;
+  // Composing/sending stays enabled during a turn so the user can queue
+  // follow-ups; the parent decides run-now vs enqueue. Only emptiness gates.
+  const canSend = !!text.trim() || attachments.length > 0;
 
   return (
     <div className="composer">
@@ -388,12 +392,13 @@ const ChatInputImpl = forwardRef<ChatInputHandle, ChatInputProps>(function ChatI
         <textarea
           ref={textareaRef}
           className="composer-textarea"
-          placeholder={isLoading ? "Waiting for response…" : "Ask Claude to edit…"}
+          placeholder={
+            isLoading ? "Queue another message…" : "Ask Claude to edit…"
+          }
           value={text}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          disabled={isLoading}
           rows={2}
           spellCheck={false}
         />
