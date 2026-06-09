@@ -123,7 +123,11 @@ type Fields = {
   borderWidth: string; borderStyle: string; borderColor: string; borderRadius: string;
   shX: string; shY: string; shBlur: string; shSpread: string; shColor: string; shAlpha: number;
   opacity: number;
+  fill: string; stroke: string;
 };
+
+// SVG-ish elements whose colour comes from fill/stroke rather than `color`.
+const SVG_TAGS = ["svg", "path", "g", "use", "circle", "rect", "line", "polygon", "polyline", "ellipse"];
 
 // Decompose a pin's real computed styles into editor fields.
 function seedFields(c: Record<string, string>): Fields {
@@ -156,6 +160,8 @@ function seedFields(c: Record<string, string>): Fields {
     borderRadius: c.borderRadius ?? "0px",
     ...sh,
     opacity: Math.round(parseFloat(c.opacity ?? "1") * 100),
+    fill: rgbToHex(c.fill ?? "#000000"),
+    stroke: c.stroke && c.stroke !== "none" ? rgbToHex(c.stroke) : "#000000",
   };
 }
 
@@ -363,7 +369,7 @@ function PinInspector({
       const next = { ...prev, [k]: v };
       const composed = composeChange(k, next);
       if (composed) {
-        const isColor = k === "color" || k === "backgroundColor" || k === "borderColor";
+        const isColor = k === "color" || k === "backgroundColor" || k === "borderColor" || k === "fill" || k === "stroke";
         const value = isColor ? rgbToHex(composed.value) : composed.value;
         onEdit({
           kind: "css",
@@ -446,6 +452,13 @@ function PinInspector({
       <Section title="Background">
         <Row label="Fill" edited={edited("backgroundColor")}><ColorField value={f.backgroundColor} onChange={(v) => set("backgroundColor", v)} /></Row>
       </Section>
+
+      {SVG_TAGS.includes(pin.fingerprint.tag) && (
+        <Section title="Icon / SVG">
+          <Row label="Fill" edited={edited("fill")}><ColorField value={f.fill} onChange={(v) => set("fill", v)} /></Row>
+          <Row label="Stroke" edited={edited("stroke")}><ColorField value={f.stroke} onChange={(v) => set("stroke", v)} /></Row>
+        </Section>
+      )}
 
       <Section title="Border">
         <Row label="Width" edited={edited("borderWidth")}><NumberField value={f.borderWidth} onChange={(v) => set("borderWidth", v)} units={["px"]} /></Row>
