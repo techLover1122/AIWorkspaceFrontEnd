@@ -201,6 +201,9 @@ type ChatPanelProps = {
   /** Reports this session's in-flight state up to the session tab strip so
    *  it can show a "running" dot on background tabs. */
   onLoadingChange?: (loading: boolean) => void;
+  /** Called once, with the first user prompt text, so the session tab can
+   *  auto-rename itself to reflect the conversation topic. */
+  onFirstMessage?: (text: string) => void;
 };
 
 export function ChatPanel({
@@ -210,6 +213,7 @@ export function ChatPanel({
   sessionKey,
   active = true,
   onLoadingChange,
+  onFirstMessage,
 }: ChatPanelProps) {
   const tabCtx = useWorkspaceTab();
   const {
@@ -397,6 +401,13 @@ export function ChatPanel({
   // Stable ref so the SSE handler can attach a WhatsApp-originated task
   // without the EventSource being recreated on every render.
   const attachWhatsAppTaskRef = useRef<(taskId: string, userMessage?: string) => void>(() => {});
+  // WhatsApp turns that arrived while the panel was mid-stream. We must NOT
+  // drop them (the old bug: only the first of a back-to-back WhatsApp burst
+  // showed in the panel). Instead we queue them here and drain one-by-one as
+  // each turn finishes. De-duped by taskId so a re-published event can't
+  // double-add.
+  const pendingWhatsAppRef = useRef<Array<{ taskId: string; userMessage?: string }>>([]);
+  const seenWhatsAppTaskRef = useRef<Set<string>>(new Set());
 
   // Manual compact: ask the AI to produce a structured summary of the
   // current conversation, then start a fresh session with just that
@@ -765,16 +776,12 @@ export function ChatPanel({
     stateRef,
   ]);
 
-  // Keep attachWhatsAppTaskRef current so the SSE handler below always
-  // has fresh callbacks without recreating the EventSource.
-  useEffect(() => {
-    attachWhatsAppTaskRef.current = (taskId: string, userMessage?: string) => {
-      // Don't hijack a task that is actively streaming right now.
-      if (stateRef.current.isLoading) return;
-      // Render the user's WhatsApp prompt as a "you" bubble so the panel
-      // shows what was asked, not just the agent's reply. The task event
-      // stream only carries assistant/tool events, so without this the
-      // user's own message would never appear in the transcript.
+  // Actually pull a WhatsApp-originated task into this panel: render the
+  // user's prompt as a "you" bubble (the task stream only carries
+  // assistant/tool events, so without this the user's own message would
+  // never appear) and attach to the task's event stream.
+  const runWhatsAppAttach = useCallback(
+    (taskId: string, userMessage?: string) => {
       const text = (userMessage ?? "").trim();
       if (text) addMessage(createUserMessage(text));
       setLoading(true);
@@ -787,8 +794,35 @@ export function ChatPanel({
         permissionMode,
       };
       void attachToTask(taskId, 0, req, streamCallbacks());
+    },
+    [workingDirectory, permissionMode, attachToTask, streamCallbacks, setLoading, setCurrentRequestId, stateRef, addMessage]
+  );
+
+  // Keep attachWhatsAppTaskRef current so the SSE handler below always
+  // has fresh callbacks without recreating the EventSource.
+  useEffect(() => {
+    attachWhatsAppTaskRef.current = (taskId: string, userMessage?: string) => {
+      if (seenWhatsAppTaskRef.current.has(taskId)) return; // de-dupe
+      seenWhatsAppTaskRef.current.add(taskId);
+      // If the panel is mid-stream, DEFER (don't drop) — attach when idle so
+      // every turn of a back-to-back WhatsApp burst shows up, in order.
+      if (stateRef.current.isLoading) {
+        pendingWhatsAppRef.current.push({ taskId, userMessage });
+        return;
+      }
+      runWhatsAppAttach(taskId, userMessage);
     };
-  }, [workingDirectory, permissionMode, attachToTask, streamCallbacks, setLoading, setCurrentRequestId, stateRef, addMessage]);
+  }, [runWhatsAppAttach, stateRef]);
+
+  // Drain the deferred-WhatsApp queue whenever the panel goes idle: attach
+  // the next queued turn (which flips isLoading back on), then the next when
+  // that one finishes — so a burst replays into the panel one turn at a time.
+  useEffect(() => {
+    if (state.isLoading) return;
+    if (pendingWhatsAppRef.current.length === 0) return;
+    const next = pendingWhatsAppRef.current.shift();
+    if (next) runWhatsAppAttach(next.taskId, next.userMessage);
+  }, [state.isLoading, runWhatsAppAttach]);
 
   const fetchAndShowPorts = useCallback(async () => {
     const placeholderId = `sys_${Date.now()}`;
@@ -867,7 +901,11 @@ export function ChatPanel({
       // prior tool call. (length-based, not id-based, so it works even
       // after a /clear or history restore.)
       turnStartIndexRef.current = stateRef.current.messages.length;
+      const isFirstUserMsg = !stateRef.current.messages.some((m) => m.role === "user");
       addMessage(createUserMessage(composed, imagePreviewUrls));
+      if (isFirstUserMsg && onFirstMessage && message.trim()) {
+        onFirstMessage(message.trim());
+      }
 
       setCurrentRequestId(requestId);
       // Reset stream seq cursor — this is a brand-new server task that
@@ -912,6 +950,7 @@ export function ChatPanel({
       setLoading,
       streamCallbacks,
       stateRef,
+      onFirstMessage,
     ]
   );
 

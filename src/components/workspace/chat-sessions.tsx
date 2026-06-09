@@ -214,28 +214,37 @@ export function ChatSessions({
     [workingDirectory]
   );
 
+  const renameSession = useCallback((id: string, firstPrompt: string) => {
+    const raw = firstPrompt.replace(/\s+/g, " ").trim();
+    const title = raw.length > 30 ? raw.slice(0, 28) + "…" : raw || "Session";
+    setSnap((prev) => {
+      const sessions = prev.sessions.map((s) =>
+        s.id === id ? { ...s, title } : s
+      );
+      return { ...prev, sessions };
+    });
+  }, []);
+
   return (
     <div className="chat-sessions">
       <div className="chat-session-tabs" role="tablist" aria-label="Chat sessions">
         {snap.sessions.map((s) => {
           const isActive = s.id === snap.activeId;
+          const isRunning = !!loadingMap[s.id];
           return (
             <div
               key={s.id}
               role="tab"
               aria-selected={isActive}
-              className={`chat-session-tab${isActive ? " active" : ""}`}
+              className={`chat-session-tab${isActive ? " active" : ""}${isRunning ? " running" : ""}`}
               onClick={() => selectSession(s.id)}
               title={s.title}
             >
-              {loadingMap[s.id] && (
-                <span className="chat-session-dot" aria-label="running" />
-              )}
               <span className="chat-session-title">{s.title}</span>
               {snap.sessions.length > 1 && (
                 <button
                   type="button"
-                  className="chat-session-close"
+                  className="chat-session-close tab-close"
                   onClick={(e) => {
                     e.stopPropagation();
                     closeSession(s.id);
@@ -258,7 +267,7 @@ export function ChatSessions({
         })}
         <button
           type="button"
-          className="chat-session-add"
+          className="chat-session-add tab-add"
           onClick={addSession}
           title="New session"
           aria-label="New session"
@@ -290,6 +299,7 @@ export function ChatSessions({
                 sessionKey={s.storageKey}
                 active={isActive}
                 onLoadingChange={(l) => handleLoadingChange(s.id, l)}
+                onFirstMessage={(text) => renameSession(s.id, text)}
               />
             </div>
           );

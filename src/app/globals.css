@@ -4921,7 +4921,7 @@ button {
 }
 
 /* =============================================================
-   Chat Sessions — multi-session tab strip
+   Chat Sessions — multi-session tab strip (matches editor-tab design)
    ============================================================= */
 
 .chat-sessions {
@@ -4932,128 +4932,100 @@ button {
   overflow: hidden;
 }
 
+/* Tab strip — identical layout to .editor-tabs */
 .chat-session-tabs {
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 1px;
-  padding: 0 4px;
-  background: var(--vsc-sidebar-bg, #1e1e1e);
-  border-bottom: 1px solid var(--vsc-panel-border, #3c3c3c);
-  flex-shrink: 0;
+  align-items: stretch;
+  height: 35px;
+  background: var(--vsc-tab-inactive);
+  border-bottom: 1px solid var(--vsc-border-strong);
   overflow-x: auto;
   scrollbar-width: none;
+  user-select: none;
+  flex-shrink: 0;
 }
 
 .chat-session-tabs::-webkit-scrollbar {
   display: none;
 }
 
+/* Individual tab — identical to .editor-tab */
 .chat-session-tab {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 4px 4px 0 0;
+  gap: 7px;
+  padding: 0 8px 0 12px;
+  background: var(--vsc-tab-inactive);
+  color: var(--vsc-text-muted);
+  border: 0;
+  border-right: 1px solid var(--vsc-border-strong);
+  border-radius: 8px 8px 0 0;
+  font-size: 13px;
+  flex: 0 0 auto;
+  position: relative;
   cursor: pointer;
-  user-select: none;
-  font-size: 11px;
-  color: var(--vsc-text-muted, #8a8a8a);
-  white-space: nowrap;
-  min-width: 0;
-  max-width: 140px;
-  transition: background 0.1s, color 0.1s;
-  flex-shrink: 0;
+  overflow: hidden;
+  transition: background 140ms ease, color 140ms ease;
+  --tab-sweep-color: var(--bot-accent);
 }
 
-.chat-session-tab:hover {
-  background: var(--vsc-list-hover, rgba(255,255,255,0.05));
-  color: var(--vsc-text, #ccc);
+.chat-session-tab:not(.active):hover {
+  background: var(--vsc-hover);
+  color: var(--vsc-text);
 }
 
+/* Active tab — same bot-accent purple gradient as .editor-tab.active */
 .chat-session-tab.active {
-  background: var(--vsc-editor-bg, #1e1e1e);
-  color: var(--vsc-text, #ccc);
-  border-bottom: 2px solid var(--vsc-accent, #007acc);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-accent) 26%, var(--vsc-bg)),
+      color-mix(in srgb, var(--bot-accent) 12%, var(--vsc-bg))
+    );
+  color: var(--vsc-text-emphasis);
+  box-shadow:
+    inset 0 2px 0 var(--bot-accent),
+    inset 1px 0 0 color-mix(in srgb, var(--bot-accent) 40%, var(--vsc-border-strong)),
+    inset -1px 0 0 color-mix(in srgb, var(--bot-accent) 40%, var(--vsc-border-strong));
 }
 
-.chat-session-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--vsc-accent, #007acc);
-  flex-shrink: 0;
-  animation: session-dot-pulse 1.2s ease-in-out infinite;
+/* Bot mascot icon on active tab — same as .editor-tab.active::before */
+.chat-session-tab.active::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  background-color: var(--bot-accent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M8 6H16a4 4 0 0 1 4 4V15a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4ZM10.5 2.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0ZM11.3 4H12.7V6H11.3ZM7.6 12a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0ZM13 12a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' fill-rule='evenodd' d='M8 6H16a4 4 0 0 1 4 4V15a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4ZM10.5 2.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0ZM11.3 4H12.7V6H11.3ZM7.6 12a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0ZM13 12a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  filter: drop-shadow(0 0 3px var(--bot-accent-glow));
 }
 
-@keyframes session-dot-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+/* Running sweep animation — same mechanics as .editor-tab.loading::before */
+.chat-session-tab.running::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 0 calc(100% - 2px) 0 round 8px 8px 0 0);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--tab-sweep-color) 28%,
+    color-mix(in srgb, var(--tab-sweep-color) 40%, #fff) 52%,
+    var(--tab-sweep-color) 72%,
+    transparent
+  );
+  background-size: 55% 100%;
+  background-repeat: no-repeat;
+  animation: tab-active-sweep 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  pointer-events: none;
 }
 
 .chat-session-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.chat-session-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  border-radius: 2px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  color: var(--vsc-text-muted, #8a8a8a);
-  opacity: 0;
-  transition: opacity 0.1s, background 0.1s;
-  padding: 0;
-}
-
-.chat-session-close svg {
-  width: 10px;
-  height: 10px;
-}
-
-.chat-session-tab:hover .chat-session-close,
-.chat-session-tab.active .chat-session-close {
-  opacity: 1;
-}
-
-.chat-session-close:hover {
-  background: var(--vsc-destructive, rgba(255,80,80,0.15));
-  color: var(--vsc-text, #ccc);
-}
-
-.chat-session-add {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  color: var(--vsc-text-muted, #8a8a8a);
-  flex-shrink: 0;
-  margin-left: 2px;
-  padding: 0;
-  transition: background 0.1s, color 0.1s;
-}
-
-.chat-session-add svg {
-  width: 12px;
-  height: 12px;
-}
-
-.chat-session-add:hover {
-  background: var(--vsc-list-hover, rgba(255,255,255,0.08));
-  color: var(--vsc-text, #ccc);
+  max-width: 160px;
 }
 
 .chat-session-bodies {
