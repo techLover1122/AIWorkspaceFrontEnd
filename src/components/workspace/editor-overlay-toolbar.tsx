@@ -131,8 +131,8 @@ export function EditorOverlayToolbar({
             type="button"
             className={`overlay-toolbar-btn${activeTool === "pointer" ? " active" : ""}`}
             onClick={() => toggleTool("pointer")}
-            title="Marker — draw on a snapshot of this tab"
-            aria-label="Marker"
+            title="Rectangle — draw a box on a snapshot of this tab"
+            aria-label="Rectangle"
             aria-pressed={activeTool === "pointer"}
           >
             <IconPointer />
@@ -298,28 +298,19 @@ function IconCross() {
 }
 
 function IconPointer() {
-  // Highlighter marker — diagonal body with a colored tip.
+  // Rectangle drawing tool icon.
   return (
     <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M11 2.5l2.5 2.5-6.5 6.5-2.5.5.5-2.5 6-7z"
+      <rect
+        x="2"
+        y="3.5"
+        width="12"
+        height="9"
+        rx="1"
         stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
+        strokeWidth="1.5"
       />
-      <path
-        d="M9 4.5l2.5 2.5"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-      />
-      <path
-        d="M3 14h4"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        opacity="0.6"
-      />
+      <circle cx="2" cy="3.5" r="1.4" fill="currentColor" />
     </svg>
   );
 }

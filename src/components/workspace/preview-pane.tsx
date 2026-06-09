@@ -70,14 +70,6 @@ type PreviewPaneProps = {
 
 export const PORTS_VIEW_URL = "aiide://ports";
 
-/** Inline-SVG `cursor: url(...)` data URIs. The two numbers after the URL
- *  are the cursor's hotspot (x y in image px) — the actual point where the
- *  click registers. The marker SVG's pen tip is around (9, 23) in its 32×32
- *  viewBox, so the hotspot needs to sit there or clicks will land offset
- *  from the visible pen tip. */
-const MARKER_CURSOR =
-  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32' fill='none'><path d='M22 4l5 5-13 13-5 1 1-5 12-14z' stroke='black' stroke-width='2' stroke-linejoin='round' fill='%23fff7c8'/><path d='M18 8l5 5' stroke='black' stroke-width='2' stroke-linecap='round'/><path d='M6 28h7' stroke='black' stroke-width='2.4' stroke-linecap='round'/></svg>\") 9 23, crosshair";
-
 /** Speech-bubble cursor used while the comments tool is active. Hotspot
  *  sits at the tail tip (~8, 28) so clicks land where the bubble points. */
 const COMMENT_CURSOR =
@@ -522,18 +514,69 @@ function DrawingShape({
   const [hover, setHover] = useState(false);
   if (drawing.points.length < 2) return null;
 
+  const DeleteHandle = ({ cx, cy }: { cx: number; cy: number }) =>
+    interactive && hover ? (
+      <g
+        transform={`translate(${cx}, ${cy})`}
+        style={{ cursor: "pointer" }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+        pointerEvents="all"
+      >
+        <circle r={9} fill="#1f1f1f" stroke="#fff" strokeWidth={1.4} />
+        <path
+          d="M-3.5 -3.5 L3.5 3.5 M3.5 -3.5 L-3.5 3.5"
+          stroke="#fff"
+          strokeWidth={1.6}
+          strokeLinecap="round"
+        />
+      </g>
+    ) : null;
+
+  // Rectangle: exactly 2 stored points = [start corner, end corner].
+  if (drawing.points.length === 2) {
+    const [p1, p2] = drawing.points;
+    const x = Math.min(p1.x, p2.x);
+    const y = Math.min(p1.y, p2.y);
+    const w = Math.abs(p2.x - p1.x);
+    const h = Math.abs(p2.y - p1.y);
+    return (
+      <g
+        onMouseEnter={() => interactive && setHover(true)}
+        onMouseLeave={() => setHover(false)}
+      >
+        <rect
+          x={x} y={y} width={w} height={h}
+          fill="none"
+          stroke={MARKER_STROKE_COLOR}
+          strokeWidth={MARKER_STROKE_WIDTH}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={0.92}
+          pointerEvents={interactive ? "stroke" : "none"}
+        />
+        {/* wider invisible hit area */}
+        <rect
+          x={x} y={y} width={w} height={h}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={20}
+          pointerEvents={interactive ? "stroke" : "none"}
+        />
+        <DeleteHandle cx={x + w} cy={Math.max(y, 10)} />
+      </g>
+    );
+  }
+
+  // Legacy: polyline for any freehand strokes with more than 2 points.
   const pointsStr = drawing.points.map((p) => `${p.x},${p.y}`).join(" ");
-  let minX = Infinity, maxX = -Infinity, minY = Infinity;
+  let maxX = -Infinity, minY = Infinity;
   for (const p of drawing.points) {
-    if (p.x < minX) minX = p.x;
     if (p.x > maxX) maxX = p.x;
     if (p.y < minY) minY = p.y;
   }
-  // X sits right at the bounding box's top-right corner so it reads as
-  // attached to the shape rather than floating off to the side.
-  const xCenter = maxX;
-  const yCenter = Math.max(minY, 10);
-
   return (
     <g
       onMouseEnter={() => interactive && setHover(true)}
@@ -557,25 +600,7 @@ function DrawingShape({
         strokeLinecap="round"
         pointerEvents={interactive ? "stroke" : "none"}
       />
-      {interactive && hover && (
-        <g
-          transform={`translate(${xCenter}, ${yCenter})`}
-          style={{ cursor: "pointer" }}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          pointerEvents="all"
-        >
-          <circle r={9} fill="#1f1f1f" stroke="#fff" strokeWidth={1.4} />
-          <path
-            d="M-3.5 -3.5 L3.5 3.5 M3.5 -3.5 L-3.5 3.5"
-            stroke="#fff"
-            strokeWidth={1.6}
-            strokeLinecap="round"
-          />
-        </g>
-      )}
+      <DeleteHandle cx={maxX} cy={Math.max(minY, 10)} />
     </g>
   );
 }
@@ -590,12 +615,10 @@ function DrawingSurface({
   onCommit: (points: DrawingPoint[]) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [livePoints, setLivePoints] = useState<DrawingPoint[]>([]);
-  // Mutable mirrors of the drawing state so the window-level listeners
-  // (bound once via useEffect) always see the latest values without
-  // suffering from closure staleness.
+  const [liveRect, setLiveRect] = useState<{ start: DrawingPoint; end: DrawingPoint } | null>(null);
   const drawingRef = useRef(false);
-  const pointsRef = useRef<DrawingPoint[]>([]);
+  const startRef = useRef<DrawingPoint | null>(null);
+  const endRef = useRef<DrawingPoint | null>(null);
   const onCommitRef = useRef(onCommit);
   useEffect(() => {
     onCommitRef.current = onCommit;
@@ -610,36 +633,31 @@ function DrawingSurface({
     if (e.button !== 0) return;
     drawingRef.current = true;
     const p = getPoint(e.clientX, e.clientY);
-    pointsRef.current = [p];
-    setLivePoints(pointsRef.current);
+    startRef.current = p;
+    endRef.current = p;
+    setLiveRect({ start: p, end: p });
   };
 
-  // We listen for pointermove / pointerup on the WINDOW rather than the
-  // surface element itself. The surface-only approach (via
-  // setPointerCapture) intermittently lost events whenever React
-  // re-rendered the parent in the middle of a stroke, the iframe stole
-  // focus, or the cursor briefly crossed over the floating overlays —
-  // resulting in "marker stops working" mid-drag. Window listeners stay
-  // bound for the lifetime of the surface and catch every event.
+  // Window-level listeners so drag continues even when the cursor leaves
+  // the surface (e.g. fast mouse moves, iframe focus steal).
   useEffect(() => {
     const handleMove = (e: PointerEvent) => {
-      if (!drawingRef.current) return;
-      const p = getPoint(e.clientX, e.clientY);
-      const last = pointsRef.current[pointsRef.current.length - 1];
-      if (last && Math.abs(last.x - p.x) < 1 && Math.abs(last.y - p.y) < 1) {
-        return;
-      }
-      pointsRef.current = [...pointsRef.current, p];
-      setLivePoints(pointsRef.current);
+      if (!drawingRef.current || !startRef.current) return;
+      const end = getPoint(e.clientX, e.clientY);
+      endRef.current = end;
+      setLiveRect({ start: startRef.current, end });
     };
     const handleUp = () => {
-      if (!drawingRef.current) return;
+      if (!drawingRef.current || !startRef.current) return;
       drawingRef.current = false;
-      const finalPoints = pointsRef.current;
-      pointsRef.current = [];
-      setLivePoints([]);
-      if (finalPoints.length > 1) {
-        onCommitRef.current(finalPoints);
+      const start = startRef.current;
+      const end = endRef.current ?? start;
+      startRef.current = null;
+      endRef.current = null;
+      setLiveRect(null);
+      // Only commit if the rectangle has some size
+      if (Math.abs(end.x - start.x) > 4 || Math.abs(end.y - start.y) > 4) {
+        onCommitRef.current([start, end]);
       }
     };
     window.addEventListener("pointermove", handleMove);
@@ -650,21 +668,23 @@ function DrawingSurface({
       window.removeEventListener("pointerup", handleUp);
       window.removeEventListener("pointercancel", handleUp);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const livePointsStr = livePoints.map((p) => `${p.x},${p.y}`).join(" ");
 
   return (
     <div
       ref={ref}
       className="preview-drawing-surface"
-      style={{ cursor: MARKER_CURSOR }}
+      style={{ cursor: "crosshair" }}
       onPointerDown={handleDown}
     >
-      {livePoints.length > 1 && (
+      {liveRect && (
         <svg className="preview-drawing-live">
-          <polyline
-            points={livePointsStr}
+          <rect
+            x={Math.min(liveRect.start.x, liveRect.end.x)}
+            y={Math.min(liveRect.start.y, liveRect.end.y)}
+            width={Math.abs(liveRect.end.x - liveRect.start.x)}
+            height={Math.abs(liveRect.end.y - liveRect.start.y)}
             fill="none"
             stroke={MARKER_STROKE_COLOR}
             strokeWidth={MARKER_STROKE_WIDTH}

@@ -1076,6 +1076,8 @@ button {
 .chat-panel {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   background: var(--vsc-panel);
   border-left: 1px solid var(--vsc-border-strong);
   overflow: hidden;
