@@ -17,8 +17,8 @@
 // The panel also owns multi-pin management (list / select / remove) and the
 // "Apply" handoff that ships the payload to the chat agent.
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { EditChange, Pin } from "../../utils/electronVisualEdit";
+import { useMemo, useRef, useState } from "react";
+import type { EditChange, EditMode, ElementPin, Pin, ShapePin } from "../../utils/electronVisualEdit";
 
 /* ───────────────────────── value helpers ───────────────────────── */
 
@@ -330,7 +330,7 @@ function BoxModel({ f, set }: { f: Fields; set: (k: keyof Fields, v: string) => 
 function PinInspector({
   pin, onEdit, onSetNote,
 }: {
-  pin: Pin;
+  pin: ElementPin;
   onEdit: (change: EditChange) => void;
   onSetNote: (note: string) => void;
 }) {
@@ -548,34 +548,77 @@ function PinInspector({
 
 /* ─────────────────────────── panel shell ─────────────────────────── */
 
+const MODES: { mode: EditMode; label: string; icon: React.ReactNode; hint: string }[] = [
+  { mode: "pick", label: "Pick", icon: <IconTarget />, hint: "Pick an element to edit its styles/text" },
+  { mode: "comment", label: "Note", icon: <IconCommentTool />, hint: "Click a point to drop a comment" },
+  { mode: "rect", label: "Box", icon: <IconRectTool />, hint: "Drag to mark a rectangular region" },
+  { mode: "pen", label: "Pen", icon: <IconPenTool />, hint: "Draw a freehand annotation" },
+];
+
+const SHAPE_LABEL: Record<string, string> = { comment: "Comment", rect: "Region", pen: "Drawing" };
+
+function ShapeInspector({ pin, onSetNote }: { pin: ShapePin; onSetNote: (note: string) => void }) {
+  const [note, setNote] = useState(pin.note ?? "");
+  const where =
+    pin.kind === "rect" && "w" in pin.geom
+      ? `${Math.round(pin.geom.w)}×${Math.round(pin.geom.h)} region`
+      : pin.kind === "pen" && "points" in pin.geom
+        ? `${pin.geom.points.length}-point stroke`
+        : "x" in pin.geom
+          ? `point (${Math.round(pin.geom.x)}, ${Math.round(pin.geom.y)})`
+          : "";
+  return (
+    <div className="ve-inspector-scroll">
+      <div className="ve-el-id">
+        <span className="ve-tag">{SHAPE_LABEL[pin.kind]}</span>
+        <span className="ve-path">{where}</span>
+      </div>
+      <Section title="Instruction">
+        <textarea
+          className="ve-note"
+          placeholder="What should change in this area? (e.g. “add more spacing here”, “this image is blurry”)"
+          value={note}
+          onChange={(e) => { setNote(e.target.value); onSetNote(e.target.value); }}
+          rows={4}
+        />
+        <p className="ve-annotations-empty">
+          This {SHAPE_LABEL[pin.kind].toLowerCase()} is sent to the agent with your note and its
+          position on the screenshot — use it for changes a single element edit can’t express.
+        </p>
+      </Section>
+    </div>
+  );
+}
+
 export function VisualEditorPanel({
   pins,
   selectedN,
-  picking,
+  mode,
   busy,
   onSelectPin,
   onRemovePin,
   onEdit,
   onSetNote,
-  onTogglePicking,
+  onSetMode,
   onApply,
   onClose,
 }: {
   pins: Pin[];
   selectedN: number | null;
-  picking: boolean;
+  mode: EditMode;
   busy?: boolean;
   onSelectPin: (n: number) => void;
   onRemovePin: (n: number) => void;
   onEdit: (n: number, change: EditChange) => void;
   onSetNote: (n: number, note: string) => void;
-  onTogglePicking: () => void;
+  onSetMode: (mode: EditMode) => void;
   onApply: () => void;
   onClose: () => void;
 }) {
   const selected = pins.find((p) => p.n === selectedN) ?? null;
   const totalEdits = pins.reduce(
-    (acc, p) => acc + Object.keys(p.annotation.css).length + (p.annotation.text ? 1 : 0),
+    (acc, p) =>
+      acc + (p.kind === "element" ? Object.keys(p.annotation.css).length + (p.annotation.text ? 1 : 0) : 1),
     0
   );
 
@@ -587,47 +630,69 @@ export function VisualEditorPanel({
       </header>
 
       <div className="ve-pinbar">
-        <button
-          type="button"
-          className={`ve-pick-btn${picking ? " active" : ""}`}
-          onClick={onTogglePicking}
-          title={picking ? "Stop picking" : "Pick an element on the page"}
-        >
-          <IconTarget /> {picking ? "Picking…" : "Pick element"}
-        </button>
-        <div className="ve-pinlist">
-          {pins.map((p) => (
-            <span key={p.n} className={`ve-pinchip${p.n === selectedN ? " active" : ""}${p.detached ? " stale" : ""}`}>
-              <button type="button" className="ve-pinchip-n" onClick={() => onSelectPin(p.n)} title={`${p.fingerprint.tag} · ${p.fingerprint.path}`}>{p.n}</button>
-              <button type="button" className="ve-pinchip-x" onClick={() => onRemovePin(p.n)} title="Remove pin"><IconClose /></button>
-            </span>
+        <div className="ve-modebar" role="group" aria-label="Annotation tool">
+          {MODES.map((m) => (
+            <button
+              key={m.mode}
+              type="button"
+              className={`ve-mode-btn${mode === m.mode ? " active" : ""}`}
+              onClick={() => onSetMode(mode === m.mode ? "off" : m.mode)}
+              title={m.hint}
+              aria-pressed={mode === m.mode}
+            >
+              {m.icon}<span>{m.label}</span>
+            </button>
           ))}
         </div>
+        {pins.length > 0 && (
+          <div className="ve-pinlist">
+            {pins.map((p) => (
+              <span
+                key={p.n}
+                className={`ve-pinchip${p.n === selectedN ? " active" : ""}${p.kind !== "element" ? " shape" : ""}${p.kind === "element" && p.detached ? " stale" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="ve-pinchip-n"
+                  onClick={() => onSelectPin(p.n)}
+                  title={p.kind === "element" ? `${p.fingerprint.tag} · ${p.fingerprint.path}` : SHAPE_LABEL[p.kind]}
+                >
+                  {p.n}
+                </button>
+                <button type="button" className="ve-pinchip-x" onClick={() => onRemovePin(p.n)} title="Remove"><IconClose /></button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {selected ? (
-        <PinInspector
-          key={selected.n}
-          pin={selected}
-          onEdit={(change) => onEdit(selected.n, change)}
-          onSetNote={(note) => onSetNote(selected.n, note)}
-        />
+        selected.kind === "element" ? (
+          <PinInspector
+            key={selected.n}
+            pin={selected}
+            onEdit={(change) => onEdit(selected.n, change)}
+            onSetNote={(note) => onSetNote(selected.n, note)}
+          />
+        ) : (
+          <ShapeInspector key={selected.n} pin={selected} onSetNote={(note) => onSetNote(selected.n, note)} />
+        )
       ) : (
         <div className="ve-empty">
           {pins.length === 0
-            ? "Click “Pick element”, then click anything on the page to drop a numbered pin."
-            : "Select a pin to edit it."}
+            ? "Pick an element to edit its styles — or use Note / Box / Pen to annotate an area for the agent."
+            : "Select an annotation to edit it."}
         </div>
       )}
 
       <footer className="ve-footer">
-        <span className="ve-footer-count">{pins.length} pin{pins.length !== 1 ? "s" : ""} · {totalEdits} edit{totalEdits !== 1 ? "s" : ""}</span>
+        <span className="ve-footer-count">{pins.length} item{pins.length !== 1 ? "s" : ""} · {totalEdits} edit{totalEdits !== 1 ? "s" : ""}</span>
         <button
           type="button"
           className="ve-apply-btn"
           onClick={onApply}
           disabled={busy || totalEdits === 0}
-          title="Send the edits to the agent to reproduce in source"
+          title="Send the edits + annotations to the agent to reproduce in source"
         >
           {busy ? "Preparing…" : "Apply in code"}
         </button>
@@ -658,4 +723,13 @@ function IconClose() {
 }
 function IconTarget() {
   return <svg className="ve-svg" viewBox="0 0 16 16" width="13" height="13" aria-hidden><circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.4" fill="none" /><circle cx="8" cy="8" r="1.6" fill="currentColor" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>;
+}
+function IconCommentTool() {
+  return <svg className="ve-svg" viewBox="0 0 16 16" width="13" height="13" aria-hidden><path d="M2.5 3h11a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 3v-3H2.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinejoin="round" /></svg>;
+}
+function IconRectTool() {
+  return <svg className="ve-svg" viewBox="0 0 16 16" width="13" height="13" aria-hidden><rect x="2" y="3.5" width="12" height="9" rx="1" stroke="currentColor" strokeWidth="1.4" fill="none" strokeDasharray="2.4 2" /></svg>;
+}
+function IconPenTool() {
+  return <svg className="ve-svg" viewBox="0 0 16 16" width="13" height="13" aria-hidden><path d="M2 14c1-3 2.5-5 4.5-6.5C9 5.5 11 4 13 2c.5 2-.5 4.5-2.5 6.5C8.5 10.5 5 12 2 14z" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinejoin="round" /></svg>;
 }

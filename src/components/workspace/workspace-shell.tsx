@@ -21,7 +21,7 @@ import {
   captureTabSnapshot,
   compositeSnapshotWithSvg,
 } from "../../utils/captureIframeSnapshot";
-import { getElectronVisualEdit, type Pin, type EditChange } from "../../utils/electronVisualEdit";
+import { getElectronVisualEdit, type Pin, type EditChange, type EditMode } from "../../utils/electronVisualEdit";
 import { VisualEditorPanel } from "./VisualEditorPanel";
 import { formatVisualEditPrompt } from "../../utils/visualEditPayload";
 
@@ -147,7 +147,7 @@ export function WorkspaceShell({
   const [veTabId, setVeTabId] = useState<string | null>(null);
   const [vePins, setVePins] = useState<Pin[]>([]);
   const [veSelected, setVeSelected] = useState<number | null>(null);
-  const [vePicking, setVePicking] = useState(false);
+  const [veMode, setVeMode] = useState<EditMode>("pick");
   const [veBusy, setVeBusy] = useState(false);
   const veActive = !!veSessionId;
   const veSessionRef = useRef<string | null>(null);
@@ -510,7 +510,7 @@ export function WorkspaceShell({
       ve.onPinSelected(({ sessionId, n }) => { if (here(sessionId)) setVeSelected(n); }),
       ve.onPinDetached(({ sessionId, n, detached }) => {
         if (!here(sessionId)) return;
-        setVePins((prev) => prev.map((p) => (p.n === n ? { ...p, detached } : p)));
+        setVePins((prev) => prev.map((p) => (p.n === n && p.kind === "element" ? { ...p, detached } : p)));
       }),
       ve.onRenumbered(({ sessionId, pins }) => {
         if (!here(sessionId)) return;
@@ -534,7 +534,7 @@ export function WorkspaceShell({
     setVeTabId(null);
     setVePins([]);
     setVeSelected(null);
-    setVePicking(false);
+    setVeMode("pick");
   }, []);
 
   const handleToggleVisualEdit = useCallback(() => {
@@ -543,8 +543,6 @@ export function WorkspaceShell({
     if (!ve) return;
     const tabId = activeTabId;
     void (async () => {
-      // Visual edit and the snapshot-annotation flow are mutually exclusive.
-      setActiveTool(null);
       const res = await ve.start(tabId);
       if (res.error || !res.sessionId) {
         // e.g. DevTools open on this view — surface and bail.
@@ -556,7 +554,7 @@ export function WorkspaceShell({
       setVeTabId(tabId);
       setVePins(res.pins ?? []);
       setVeSelected((res.pins ?? [])[0]?.n ?? null);
-      setVePicking(true);
+      setVeMode("pick");
     })();
   }, [activeTabId, handleVeClose]);
 
@@ -566,15 +564,12 @@ export function WorkspaceShell({
     if (veSessionId && veTabId && activeTabId !== veTabId) handleVeClose();
   }, [activeTabId, veSessionId, veTabId, handleVeClose]);
 
-  const handleVeTogglePicking = useCallback(() => {
+  const handleVeSetMode = useCallback((mode: EditMode) => {
     const ve = getElectronVisualEdit();
     const sid = veSessionRef.current;
     if (!ve || !sid) return;
-    setVePicking((cur) => {
-      if (cur) ve.pausePicking(sid).catch(() => {});
-      else ve.resumePicking(sid).catch(() => {});
-      return !cur;
-    });
+    setVeMode(mode);
+    ve.setMode(sid, mode).catch(() => {});
   }, []);
 
   const handleVeEdit = useCallback((n: number, change: EditChange) => {
@@ -583,7 +578,7 @@ export function WorkspaceShell({
     if (!ve || !sid) return;
     void ve.applyEdit(sid, n, change).then((res) => {
       if (res?.annotation) {
-        setVePins((prev) => prev.map((p) => (p.n === n ? { ...p, annotation: res.annotation! } : p)));
+        setVePins((prev) => prev.map((p) => (p.n === n && p.kind === "element" ? { ...p, annotation: res.annotation! } : p)));
       }
     });
   }, []);
@@ -605,7 +600,14 @@ export function WorkspaceShell({
     const sid = veSessionRef.current;
     if (!ve || !sid) return;
     void ve.setNote(sid, n, note);
-    setVePins((prev) => prev.map((p) => (p.n === n ? { ...p, annotation: { ...p.annotation, note: note || undefined } } : p)));
+    setVePins((prev) =>
+      prev.map((p) => {
+        if (p.n !== n) return p;
+        return p.kind === "element"
+          ? { ...p, annotation: { ...p.annotation, note: note || undefined } }
+          : { ...p, note };
+      })
+    );
   }, []);
 
   const handleVeApply = useCallback(() => {
@@ -1007,10 +1009,13 @@ export function WorkspaceShell({
                 activeTool={activeTool}
                 onChangeTool={handleChangeTool}
                 onReload={handleActiveTabReload}
-                showAnnotationTools={!!activeTab.url}
                 onCollapse={handleToolbarCollapse}
                 onSend={handleToolbarSend}
                 hasSnapshot={!!snapshotByTab[activeTab.id]}
+                /* Old snapshot-based marker/comments flow folded into the
+                   visual editor — keep it hidden by not enabling the
+                   annotation tools. */
+                showAnnotationTools={false}
                 showVisualEdit={!!activeTab.url && !!getElectronVisualEdit()}
                 visualEditActive={veActive && veTabId === activeTab.id}
                 onToggleVisualEdit={handleToggleVisualEdit}
@@ -1092,13 +1097,13 @@ export function WorkspaceShell({
               <VisualEditorPanel
                 pins={vePins}
                 selectedN={veSelected}
-                picking={vePicking}
+                mode={veMode}
                 busy={veBusy}
                 onSelectPin={setVeSelected}
                 onRemovePin={handleVeRemovePin}
                 onEdit={handleVeEdit}
                 onSetNote={handleVeSetNote}
-                onTogglePicking={handleVeTogglePicking}
+                onSetMode={handleVeSetMode}
                 onApply={handleVeApply}
                 onClose={handleVeClose}
               />

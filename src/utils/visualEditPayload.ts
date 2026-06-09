@@ -15,25 +15,42 @@ import type { EditTask, Pin } from "./electronVisualEdit";
 
 function describePin(p: Pin): string {
   const lines: string[] = [];
-  const fp = p.fingerprint;
-  const loc = fp.loc ? ` (source: ${fp.loc})` : "";
-  const label = fp.text ? ` “${fp.text}”` : "";
-  lines.push(`Pin ${p.n} — <${fp.tag}>${label} at \`${fp.path}\`${loc}${p.detached ? " [node was re-rendered; re-localize via fingerprint]" : ""}`);
-  for (const [prop, d] of Object.entries(p.annotation.css)) {
-    lines.push(`    • ${prop}: ${d.from} → ${d.to}`);
+  if (p.kind === "element") {
+    const fp = p.fingerprint;
+    const loc = fp.loc ? ` (source: ${fp.loc})` : "";
+    const label = fp.text ? ` “${fp.text}”` : "";
+    lines.push(`Pin ${p.n} — <${fp.tag}>${label} at \`${fp.path}\`${loc}${p.detached ? " [node was re-rendered; re-localize via fingerprint]" : ""}`);
+    for (const [prop, d] of Object.entries(p.annotation.css)) {
+      lines.push(`    • ${prop}: ${d.from} → ${d.to}`);
+    }
+    if (p.annotation.text) {
+      lines.push(`    • text: ${JSON.stringify(p.annotation.text.from)} → ${JSON.stringify(p.annotation.text.to)}`);
+    }
+    if (p.annotation.note) {
+      lines.push(`    • note: ${p.annotation.note}`);
+    }
+    return lines.join("\n");
   }
-  if (p.annotation.text) {
-    lines.push(`    • text: ${JSON.stringify(p.annotation.text.from)} → ${JSON.stringify(p.annotation.text.to)}`);
-  }
-  if (p.annotation.note) {
-    lines.push(`    • note: ${p.annotation.note}`);
-  }
+  // Freeform shape annotation — located by its drawn mark on the screenshot.
+  const where =
+    p.kind === "rect" && "w" in p.geom
+      ? `rectangular region ~${Math.round(p.geom.w)}×${Math.round(p.geom.h)}px at (${Math.round(p.geom.x)}, ${Math.round(p.geom.y)})`
+      : p.kind === "pen" && "points" in p.geom
+        ? `freehand-circled area (${p.geom.points.length} points)`
+        : "x" in p.geom
+          ? `point at (${Math.round(p.geom.x)}, ${Math.round(p.geom.y)})`
+          : "";
+  const kindWord = p.kind === "comment" ? "Comment" : p.kind === "rect" ? "Region" : "Drawing";
+  lines.push(`Annotation ${p.n} (${kindWord}) — ${where}, marked on the screenshot.`);
+  lines.push(`    • ${p.note ? p.note : "(no note — infer the intended change from the marked area)"}`);
   return lines.join("\n");
 }
 
 export function formatVisualEditPrompt(task: EditTask): string {
-  const pins = task.annotations.filter(
-    (p) => Object.keys(p.annotation.css).length || p.annotation.text || p.annotation.note
+  const pins = task.annotations.filter((p) =>
+    p.kind === "element"
+      ? Object.keys(p.annotation.css).length || p.annotation.text || p.annotation.note
+      : true
   );
   const body = pins.map(describePin).join("\n\n");
   return (

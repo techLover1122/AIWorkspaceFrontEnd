@@ -6137,3 +6137,29 @@ button {
 }
 .ve-apply-btn:hover:not(:disabled) { background: var(--vsc-accent-hover); }
 .ve-apply-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* visual-edit mode bar (Pick / Note / Box / Pen) + shape chips */
+.ve-modebar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.ve-mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 2px;
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 6px;
+  background: var(--vsc-input-bg);
+  color: var(--vsc-text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.ve-mode-btn:hover { background: var(--vsc-hover); color: var(--vsc-text); }
+.ve-mode-btn.active {
+  background: var(--vsc-accent-soft);
+  color: var(--vsc-text-link);
+  border-color: var(--vsc-accent);
+}
+.ve-pinchip.shape .ve-pinchip-n { color: #ef9a9a; }
+.ve-pinchip.shape.active { border-color: #ef4444; background: rgba(239, 68, 68, 0.12); }
+.ve-pinchip.shape.active .ve-pinchip-n { color: #ef4444; }

@@ -25,18 +25,39 @@ export type PinAnnotation = {
   note?: string;
 };
 
-export type Pin = {
+/** An element pin — precise CSS/text edits localized to one DOM node. */
+export type ElementPin = {
   n: number;
+  kind: "element";
   fingerprint: PinFingerprint;
   computed: ComputedStyles;
   /** Full current textContent of the element, captured at pick. */
   text?: string;
-  /** True when the element is a leaf (no child elements) — safe to edit its
-   *  textContent without clobbering children. Drives the Content field. */
+  /** True when the element directly owns visible text — safe to edit its
+   *  textContent. Drives the Content field. */
   textEditable?: boolean;
   annotation: PinAnnotation;
   detached: boolean;
 };
+
+export type ShapeKind = "comment" | "rect" | "pen";
+export type ShapeGeom =
+  | { x: number; y: number } // comment
+  | { x: number; y: number; w: number; h: number } // rect
+  | { points: { x: number; y: number }[] }; // pen
+
+/** A freeform annotation drawn on the page (folded in from the old tools). */
+export type ShapePin = {
+  n: number;
+  kind: ShapeKind;
+  geom: ShapeGeom;
+  note?: string;
+};
+
+export type Pin = ElementPin | ShapePin;
+
+/** Drawing/picking mode for the session. */
+export type EditMode = "pick" | "comment" | "rect" | "pen" | "off";
 
 /** One edit applied through applyEdit — already composed to real CSS. */
 export type EditChange =
@@ -63,6 +84,7 @@ export type ElectronVisualEdit = {
   removePin: (sessionId: string, n: number) => Promise<{ ok?: boolean; pins?: Pin[]; error?: string }>;
   pausePicking: (sessionId: string) => Promise<unknown>;
   resumePicking: (sessionId: string) => Promise<unknown>;
+  setMode: (sessionId: string, mode: EditMode) => Promise<{ ok?: boolean; mode?: EditMode }>;
   buildEditTask: (sessionId: string) => Promise<EditTask & { error?: string }>;
   end: (sessionId: string) => Promise<{ ok?: boolean }>;
 
