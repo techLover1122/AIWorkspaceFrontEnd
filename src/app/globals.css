@@ -4920,6 +4920,223 @@ button {
   color: var(--vsc-text-emphasis);
 }
 
+/* =============================================================
+   Chat Sessions — multi-session tab strip
+   ============================================================= */
+
+.chat-sessions {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-session-tabs {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1px;
+  padding: 0 4px;
+  background: var(--vsc-sidebar-bg, #1e1e1e);
+  border-bottom: 1px solid var(--vsc-panel-border, #3c3c3c);
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-session-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-session-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  color: var(--vsc-text-muted, #8a8a8a);
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 140px;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+
+.chat-session-tab:hover {
+  background: var(--vsc-list-hover, rgba(255,255,255,0.05));
+  color: var(--vsc-text, #ccc);
+}
+
+.chat-session-tab.active {
+  background: var(--vsc-editor-bg, #1e1e1e);
+  color: var(--vsc-text, #ccc);
+  border-bottom: 2px solid var(--vsc-accent, #007acc);
+}
+
+.chat-session-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vsc-accent, #007acc);
+  flex-shrink: 0;
+  animation: session-dot-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes session-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.chat-session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-session-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--vsc-text-muted, #8a8a8a);
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
+  padding: 0;
+}
+
+.chat-session-close svg {
+  width: 10px;
+  height: 10px;
+}
+
+.chat-session-tab:hover .chat-session-close,
+.chat-session-tab.active .chat-session-close {
+  opacity: 1;
+}
+
+.chat-session-close:hover {
+  background: var(--vsc-destructive, rgba(255,80,80,0.15));
+  color: var(--vsc-text, #ccc);
+}
+
+.chat-session-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--vsc-text-muted, #8a8a8a);
+  flex-shrink: 0;
+  margin-left: 2px;
+  padding: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.chat-session-add svg {
+  width: 12px;
+  height: 12px;
+}
+
+.chat-session-add:hover {
+  background: var(--vsc-list-hover, rgba(255,255,255,0.08));
+  color: var(--vsc-text, #ccc);
+}
+
+.chat-session-bodies {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.chat-session-body {
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* =============================================================
+   Chat Queue — prompt queue pills
+   ============================================================= */
+
+.chat-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 10px 4px;
+  background: var(--vsc-editor-bg, #1e1e1e);
+  border-top: 1px solid var(--vsc-panel-border, #3c3c3c);
+}
+
+.chat-queue-label {
+  font-size: 10px;
+  color: var(--vsc-text-muted, #8a8a8a);
+  padding-bottom: 2px;
+  letter-spacing: 0.02em;
+}
+
+.chat-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--vsc-input-bg, #2a2a2a);
+  border: 1px solid var(--vsc-panel-border, #3c3c3c);
+  border-radius: 4px;
+  padding: 3px 6px 3px 5px;
+  font-size: 11px;
+  color: var(--vsc-text, #ccc);
+}
+
+.chat-queue-num {
+  font-size: 10px;
+  color: var(--vsc-text-muted, #8a8a8a);
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+
+.chat-queue-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-queue-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--vsc-text-muted, #8a8a8a);
+  padding: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.chat-queue-cancel:hover {
+  background: var(--vsc-destructive, rgba(255,80,80,0.15));
+  color: #ff6b6b;
+}
+
 .ntp-card-port {
   font-size: 11px;
   font-family: var(--font-mono);

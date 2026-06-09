@@ -477,7 +477,20 @@ const ChatInputImpl = forwardRef<ChatInputHandle, ChatInputProps>(function ChatI
               <IconCode />
               <span>{MODE_LABEL[permissionMode]}</span>
             </button>
-            {isLoading && onStop ? (
+            {/* While a turn runs, the send button QUEUES the message (the
+                parent enqueues it) and a separate Stop button halts the
+                current turn. When idle, only the send button shows. */}
+            <button
+              type="button"
+              className="composer-send"
+              onClick={handleSend}
+              disabled={!canSend}
+              title={isLoading ? "Queue message (sends after current reply)" : "Send"}
+              aria-label={isLoading ? "Queue message" : "Send"}
+            >
+              <IconArrowUp />
+            </button>
+            {isLoading && onStop && (
               <button
                 type="button"
                 className="composer-send stop"
@@ -488,17 +501,6 @@ const ChatInputImpl = forwardRef<ChatInputHandle, ChatInputProps>(function ChatI
                 <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden>
                   <rect x="4" y="4" width="8" height="8" rx="1" />
                 </svg>
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="composer-send"
-                onClick={handleSend}
-                disabled={!canSend}
-                title="Send"
-                aria-label="Send"
-              >
-                <IconArrowUp />
               </button>
             )}
           </div>

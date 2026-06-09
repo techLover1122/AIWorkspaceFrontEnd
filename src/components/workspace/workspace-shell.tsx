@@ -6,7 +6,7 @@ import { logTabUrl, openedUrlsUrl, setOpenedUrl, urlsUrl, eventsUrl } from "../.
 import { toPublicServiceUrl } from "../../utils/registerService";
 import { WorkspaceTabContext } from "../../contexts/WorkspaceTabContext";
 import { getElectronTabs } from "../../utils/electronTabs";
-import { ChatPanel } from "./chat-panel";
+import { ChatSessions } from "./chat-sessions";
 import { EditorTabs } from "./editor-tabs";
 import { EditorOverlayToolbar, type EditorOverlayTool } from "./editor-overlay-toolbar";
 import {
@@ -915,7 +915,7 @@ export function WorkspaceShell({
             title="Drag to resize · Double-click to reset"
           />
 
-          <ChatPanel
+          <ChatSessions
             workingDirectory={workingDirectory}
             onChangeProject={onChangeProject}
             chatInputRef={chatInputRef}
