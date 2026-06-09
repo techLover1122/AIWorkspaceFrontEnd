@@ -33,6 +33,22 @@ const compose = (num: string, unit: string): string => {
   if (num === "" || num == null) return "0" + (unit || "px");
   return num + (unit || "px");
 };
+// Arrow-key stepping for numeric inputs (Figma-style): ↑/↓ = ±1, Shift = ±10,
+// Alt = ±0.1. Returns the new composed value, or null if the key/unit isn't
+// steppable (so the caller can fall through to default behaviour).
+const stepValue = (
+  value: string,
+  unit: string,
+  e: React.KeyboardEvent
+): string | null => {
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return null;
+  if (unit === "auto" || unit === "none") return null;
+  const dir = e.key === "ArrowUp" ? 1 : -1;
+  const step = e.shiftKey ? 10 : e.altKey ? 0.1 : 1;
+  const cur = parseFloat(splitVal(value).num || "0") || 0;
+  const next = Math.round((cur + dir * step) * 1000) / 1000;
+  return compose(String(next), unit);
+};
 const clampByte = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
 const toHex2 = (n: number) => clampByte(n).toString(16).padStart(2, "0");
 const rgbToHex = (v: string): string => {
@@ -205,6 +221,10 @@ function NumberField({
         type="text" inputMode="decimal" value={keyword ? "" : num} disabled={keyword}
         placeholder={keyword ? unit : "0"}
         onChange={(e) => onChange(compose(e.target.value, unit))}
+        onKeyDown={(e) => {
+          const stepped = stepValue(value, unit, e);
+          if (stepped !== null) { e.preventDefault(); onChange(stepped); }
+        }}
         className="ve-input ve-num"
       />
       <select className="ve-select ve-unit" value={unit} onChange={(e) => onChange(compose(num, e.target.value))}>
@@ -263,7 +283,15 @@ function Slider({ value, onChange, min = 0, max = 100, suffix = "" }: { value: n
 function Edge({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { num } = splitVal(value);
   return (
-    <input className="ve-edge" value={num} onChange={(e) => onChange(compose(e.target.value, "px"))} />
+    <input
+      className="ve-edge"
+      value={num}
+      onChange={(e) => onChange(compose(e.target.value, "px"))}
+      onKeyDown={(e) => {
+        const stepped = stepValue(value, "px", e);
+        if (stepped !== null) { e.preventDefault(); onChange(stepped); }
+      }}
+    />
   );
 }
 
@@ -326,6 +354,7 @@ function PinInspector({
 
   const [f, setF] = useState<Fields>(seed);
   const [note, setNoteState] = useState(pin.annotation.note ?? "");
+  const [text, setText] = useState(pin.annotation.text?.to ?? pin.text ?? "");
   const computedRef = useRef(pin.computed);
   computedRef.current = pin.computed;
 
@@ -440,6 +469,25 @@ function PinInspector({
 
       <Section title="Effects">
         <Row label="Opacity" edited={edited("opacity")}><Slider value={f.opacity} onChange={(v) => set("opacity", v)} suffix="%" /></Row>
+      </Section>
+
+      <Section title="Content">
+        {pin.textEditable ? (
+          <textarea
+            className="ve-note"
+            placeholder="Element text…"
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              onEdit({ kind: "text", value: e.target.value, from: pin.text ?? "" });
+            }}
+            rows={2}
+          />
+        ) : (
+          <p className="ve-annotations-empty">
+            This element has child elements — edit its text on the specific leaf you pinned.
+          </p>
+        )}
       </Section>
 
       <Section title="Note (optional)">

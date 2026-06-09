@@ -36,10 +36,6 @@ const DEFAULT_CHAT_WIDTH = 380;
 const MIN_CHAT_WIDTH = 280;
 const MAX_CHAT_WIDTH_RATIO = 0.7;
 const TOOLBAR_VISIBLE_KEY = "ai-ide:overlay-toolbar-visible";
-// Width of the docked visual-edit inspector. When a session is active the
-// active tab's WebContentsView bounds shrink by this much so the panel (plain
-// renderer DOM) is visible beside the live page instead of being occluded.
-const VE_PANEL_WIDTH = 300;
 
 // Monotonic counter so tab IDs stay unique even when several are created
 // inside the same millisecond — e.g. the openedUrls restore loop on mount,
@@ -451,15 +447,14 @@ export function WorkspaceShell({
     const push = () => {
       rafId = 0;
       const r = el.getBoundingClientRect();
-      // When the visual-edit inspector is docked on this tab, shrink the
-      // WebContentsView so the panel (renderer DOM) shows beside the live
-      // page instead of being occluded by the composited-above view.
-      const dock = veActive && veTabId === activeTabId ? VE_PANEL_WIDTH : 0;
+      // The view fills the editor column at full width. The visual-edit
+      // inspector overlays the chat-panel column (plain DOM, never occluded),
+      // so the live page keeps its full width — no forced mobile layout.
       electron
         .setBounds(activeTabId, {
           x: r.left,
           y: r.top,
-          width: Math.max(0, r.width - dock),
+          width: r.width,
           height: r.height,
         })
         .catch(() => {});
@@ -478,7 +473,7 @@ export function WorkspaceShell({
       ro.disconnect();
       window.removeEventListener("resize", schedule);
     };
-  }, [activeTabId, chatWidth, toolbarVisible, veActive, veTabId]);
+  }, [activeTabId, chatWidth, toolbarVisible]);
 
   useEffect(() => {
     if (isResizing) return;
@@ -513,9 +508,9 @@ export function WorkspaceShell({
         setVeSelected(pin.n);
       }),
       ve.onPinSelected(({ sessionId, n }) => { if (here(sessionId)) setVeSelected(n); }),
-      ve.onPinDetached(({ sessionId, n }) => {
+      ve.onPinDetached(({ sessionId, n, detached }) => {
         if (!here(sessionId)) return;
-        setVePins((prev) => prev.map((p) => (p.n === n ? { ...p, detached: true } : p)));
+        setVePins((prev) => prev.map((p) => (p.n === n ? { ...p, detached } : p)));
       }),
       ve.onRenumbered(({ sessionId, pins }) => {
         if (!here(sessionId)) return;
@@ -1068,28 +1063,6 @@ export function WorkspaceShell({
                   onNavigate={handleTabNavigate}
                 />
               ))}
-
-              {/* Visual-edit inspector — docked on the right of the editor
-                  body. The active tab's WebContentsView is shrunk by
-                  VE_PANEL_WIDTH (bounds effect above) so this DOM panel isn't
-                  occluded by the composited-above view. */}
-              {veActive && veTabId === activeTab.id && (
-                <div className="ve-dock" style={{ width: VE_PANEL_WIDTH }}>
-                  <VisualEditorPanel
-                    pins={vePins}
-                    selectedN={veSelected}
-                    picking={vePicking}
-                    busy={veBusy}
-                    onSelectPin={setVeSelected}
-                    onRemovePin={handleVeRemovePin}
-                    onEdit={handleVeEdit}
-                    onSetNote={handleVeSetNote}
-                    onTogglePicking={handleVeTogglePicking}
-                    onApply={handleVeApply}
-                    onClose={handleVeClose}
-                  />
-                </div>
-              )}
             </div>
           </section>
 
@@ -1108,6 +1081,29 @@ export function WorkspaceShell({
             onChangeProject={onChangeProject}
             chatInputRef={chatInputRef}
           />
+
+          {/* Visual-edit inspector. Overlays the chat-panel column (plain DOM,
+              never occluded by the composited WebContentsView) so the live
+              page keeps its full editor width — opening the inspector no
+              longer squeezes the site into a mobile layout. Matches the chat
+              column width so it sits exactly over it. */}
+          {veActive && veTabId === activeTab.id && (
+            <div className="ve-dock" style={{ width: chatWidth }}>
+              <VisualEditorPanel
+                pins={vePins}
+                selectedN={veSelected}
+                picking={vePicking}
+                busy={veBusy}
+                onSelectPin={setVeSelected}
+                onRemovePin={handleVeRemovePin}
+                onEdit={handleVeEdit}
+                onSetNote={handleVeSetNote}
+                onTogglePicking={handleVeTogglePicking}
+                onApply={handleVeApply}
+                onClose={handleVeClose}
+              />
+            </div>
+          )}
         </section>
       </section>
     </main>

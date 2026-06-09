@@ -29,6 +29,11 @@ export type Pin = {
   n: number;
   fingerprint: PinFingerprint;
   computed: ComputedStyles;
+  /** Full current textContent of the element, captured at pick. */
+  text?: string;
+  /** True when the element is a leaf (no child elements) — safe to edit its
+   *  textContent without clobbering children. Drives the Content field. */
+  textEditable?: boolean;
   annotation: PinAnnotation;
   detached: boolean;
 };
@@ -63,7 +68,7 @@ export type ElectronVisualEdit = {
 
   onPinAdded: (cb: (e: { sessionId: string; pin: Pin }) => void) => () => void;
   onPinSelected: (cb: (e: { sessionId: string; n: number }) => void) => () => void;
-  onPinDetached: (cb: (e: { sessionId: string; n: number }) => void) => () => void;
+  onPinDetached: (cb: (e: { sessionId: string; n: number; detached: boolean }) => void) => () => void;
   onRenumbered: (cb: (e: { sessionId: string; pins: Pin[] }) => void) => () => void;
   onReset: (cb: (e: { sessionId: string }) => void) => () => void;
 };

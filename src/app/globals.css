@@ -138,6 +138,9 @@ button {
   /* Default: editor | 4px splitter | chat (overridden by inline style from JS) */
   grid-template-columns: minmax(0, 1fr) 4px 380px;
   min-height: 0;
+  /* Positioning context for the visual-edit inspector (.ve-dock), which
+     overlays the chat-panel column on the right. */
+  position: relative;
 }
 
 /* ===== Splitter (VS Code-style draggable divider) ===== */
