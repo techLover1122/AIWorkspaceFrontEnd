@@ -152,6 +152,12 @@ export function WorkspaceShell({
   const veActive = !!veSessionId;
   const veSessionRef = useRef<string | null>(null);
   veSessionRef.current = veSessionId;
+  // Whether the visual-edit tool is available (Electron preload present).
+  // Resolved AFTER mount so the first client render matches the SSR HTML
+  // (getElectronVisualEdit() is null on the server, an object in Electron) —
+  // computing it during render caused a hydration mismatch on the toolbar.
+  const [veAvailable, setVeAvailable] = useState(false);
+  useEffect(() => { setVeAvailable(!!getElectronVisualEdit()); }, []);
 
   // Imperative handle into ChatInput so we can drop the composited snapshot
   // PNG as an attachment after Send.
@@ -1016,7 +1022,7 @@ export function WorkspaceShell({
                    visual editor — keep it hidden by not enabling the
                    annotation tools. */
                 showAnnotationTools={false}
-                showVisualEdit={!!activeTab.url && !!getElectronVisualEdit()}
+                showVisualEdit={!!activeTab.url && veAvailable}
                 visualEditActive={veActive && veTabId === activeTab.id}
                 onToggleVisualEdit={handleToggleVisualEdit}
               />
