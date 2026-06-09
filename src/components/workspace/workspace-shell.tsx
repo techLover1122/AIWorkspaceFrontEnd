@@ -21,6 +21,9 @@ import {
   captureTabSnapshot,
   compositeSnapshotWithSvg,
 } from "../../utils/captureIframeSnapshot";
+import { getElectronVisualEdit, type Pin, type EditChange } from "../../utils/electronVisualEdit";
+import { VisualEditorPanel } from "./VisualEditorPanel";
+import { formatVisualEditPrompt } from "../../utils/visualEditPayload";
 
 type WorkspaceShellProps = {
   codeServerUrl: string;
@@ -33,6 +36,10 @@ const DEFAULT_CHAT_WIDTH = 380;
 const MIN_CHAT_WIDTH = 280;
 const MAX_CHAT_WIDTH_RATIO = 0.7;
 const TOOLBAR_VISIBLE_KEY = "ai-ide:overlay-toolbar-visible";
+// Width of the docked visual-edit inspector. When a session is active the
+// active tab's WebContentsView bounds shrink by this much so the panel (plain
+// renderer DOM) is visible beside the live page instead of being occluded.
+const VE_PANEL_WIDTH = 300;
 
 // Monotonic counter so tab IDs stay unique even when several are created
 // inside the same millisecond — e.g. the openedUrls restore loop on mount,
@@ -136,6 +143,20 @@ export function WorkspaceShell({
     },
     []
   );
+  // ── Visual-edit session state ────────────────────────────────────────
+  // A live visual-edit session is bound to one tab at a time. The main
+  // process owns the picker + preview agent + pin overlay (on the tab's
+  // WebContentsView); we hold the mirror of the pin list + the selection.
+  const [veSessionId, setVeSessionId] = useState<string | null>(null);
+  const [veTabId, setVeTabId] = useState<string | null>(null);
+  const [vePins, setVePins] = useState<Pin[]>([]);
+  const [veSelected, setVeSelected] = useState<number | null>(null);
+  const [vePicking, setVePicking] = useState(false);
+  const [veBusy, setVeBusy] = useState(false);
+  const veActive = !!veSessionId;
+  const veSessionRef = useRef<string | null>(null);
+  veSessionRef.current = veSessionId;
+
   // Imperative handle into ChatInput so we can drop the composited snapshot
   // PNG as an attachment after Send.
   const chatInputRef = useRef<ChatInputHandle>(null);
@@ -430,11 +451,15 @@ export function WorkspaceShell({
     const push = () => {
       rafId = 0;
       const r = el.getBoundingClientRect();
+      // When the visual-edit inspector is docked on this tab, shrink the
+      // WebContentsView so the panel (renderer DOM) shows beside the live
+      // page instead of being occluded by the composited-above view.
+      const dock = veActive && veTabId === activeTabId ? VE_PANEL_WIDTH : 0;
       electron
         .setBounds(activeTabId, {
           x: r.left,
           y: r.top,
-          width: r.width,
+          width: Math.max(0, r.width - dock),
           height: r.height,
         })
         .catch(() => {});
@@ -453,7 +478,7 @@ export function WorkspaceShell({
       ro.disconnect();
       window.removeEventListener("resize", schedule);
     };
-  }, [activeTabId, chatWidth, toolbarVisible]);
+  }, [activeTabId, chatWidth, toolbarVisible, veActive, veTabId]);
 
   useEffect(() => {
     if (isResizing) return;
@@ -475,6 +500,144 @@ export function WorkspaceShell({
       return next;
     });
   }, []);
+
+  // ── Visual-edit: subscribe to main-process pin events ────────────────
+  useEffect(() => {
+    const ve = getElectronVisualEdit();
+    if (!ve) return;
+    const here = (sid: string) => sid === veSessionRef.current;
+    const unsubs = [
+      ve.onPinAdded(({ sessionId, pin }) => {
+        if (!here(sessionId)) return;
+        setVePins((prev) => [...prev.filter((p) => p.n !== pin.n), pin].sort((a, b) => a.n - b.n));
+        setVeSelected(pin.n);
+      }),
+      ve.onPinSelected(({ sessionId, n }) => { if (here(sessionId)) setVeSelected(n); }),
+      ve.onPinDetached(({ sessionId, n }) => {
+        if (!here(sessionId)) return;
+        setVePins((prev) => prev.map((p) => (p.n === n ? { ...p, detached: true } : p)));
+      }),
+      ve.onRenumbered(({ sessionId, pins }) => {
+        if (!here(sessionId)) return;
+        setVePins(pins);
+        setVeSelected((cur) => (cur && pins.some((p) => p.n === cur) ? cur : pins[0]?.n ?? null));
+      }),
+      ve.onReset(({ sessionId }) => {
+        if (!here(sessionId)) return;
+        setVePins([]);
+        setVeSelected(null);
+      }),
+    ];
+    return () => unsubs.forEach((u) => u());
+  }, []);
+
+  const handleVeClose = useCallback(() => {
+    const ve = getElectronVisualEdit();
+    const sid = veSessionRef.current;
+    if (ve && sid) ve.end(sid).catch(() => {});
+    setVeSessionId(null);
+    setVeTabId(null);
+    setVePins([]);
+    setVeSelected(null);
+    setVePicking(false);
+  }, []);
+
+  const handleToggleVisualEdit = useCallback(() => {
+    if (veSessionRef.current) { handleVeClose(); return; }
+    const ve = getElectronVisualEdit();
+    if (!ve) return;
+    const tabId = activeTabId;
+    void (async () => {
+      // Visual edit and the snapshot-annotation flow are mutually exclusive.
+      setActiveTool(null);
+      const res = await ve.start(tabId);
+      if (res.error || !res.sessionId) {
+        // e.g. DevTools open on this view — surface and bail.
+        // eslint-disable-next-line no-console
+        console.error("visual-edit start failed:", res.error);
+        return;
+      }
+      setVeSessionId(res.sessionId);
+      setVeTabId(tabId);
+      setVePins(res.pins ?? []);
+      setVeSelected((res.pins ?? [])[0]?.n ?? null);
+      setVePicking(true);
+    })();
+  }, [activeTabId, handleVeClose]);
+
+  // Close the session if the user switches away from the edited tab — the
+  // panel + shrunk bounds only make sense on the tab being edited.
+  useEffect(() => {
+    if (veSessionId && veTabId && activeTabId !== veTabId) handleVeClose();
+  }, [activeTabId, veSessionId, veTabId, handleVeClose]);
+
+  const handleVeTogglePicking = useCallback(() => {
+    const ve = getElectronVisualEdit();
+    const sid = veSessionRef.current;
+    if (!ve || !sid) return;
+    setVePicking((cur) => {
+      if (cur) ve.pausePicking(sid).catch(() => {});
+      else ve.resumePicking(sid).catch(() => {});
+      return !cur;
+    });
+  }, []);
+
+  const handleVeEdit = useCallback((n: number, change: EditChange) => {
+    const ve = getElectronVisualEdit();
+    const sid = veSessionRef.current;
+    if (!ve || !sid) return;
+    void ve.applyEdit(sid, n, change).then((res) => {
+      if (res?.annotation) {
+        setVePins((prev) => prev.map((p) => (p.n === n ? { ...p, annotation: res.annotation! } : p)));
+      }
+    });
+  }, []);
+
+  const handleVeRemovePin = useCallback((n: number) => {
+    const ve = getElectronVisualEdit();
+    const sid = veSessionRef.current;
+    if (!ve || !sid) return;
+    void ve.removePin(sid, n).then((res) => {
+      if (res?.pins) {
+        setVePins(res.pins);
+        setVeSelected((cur) => (cur === n ? res.pins![0]?.n ?? null : cur));
+      }
+    });
+  }, []);
+
+  const handleVeSetNote = useCallback((n: number, note: string) => {
+    const ve = getElectronVisualEdit();
+    const sid = veSessionRef.current;
+    if (!ve || !sid) return;
+    void ve.setNote(sid, n, note);
+    setVePins((prev) => prev.map((p) => (p.n === n ? { ...p, annotation: { ...p.annotation, note: note || undefined } } : p)));
+  }, []);
+
+  const handleVeApply = useCallback(() => {
+    const ve = getElectronVisualEdit();
+    const sid = veSessionRef.current;
+    if (!ve || !sid) return;
+    void (async () => {
+      setVeBusy(true);
+      try {
+        const task = await ve.buildEditTask(sid);
+        if (task.error) {
+          // eslint-disable-next-line no-console
+          console.error("visual-edit buildEditTask failed:", task.error);
+          return;
+        }
+        if (task.targetScreenshot) {
+          const blob = await (await fetch(task.targetScreenshot)).blob();
+          const file = new File([blob], `visual-edit-${Date.now()}.png`, { type: "image/png" });
+          chatInputRef.current?.addImageAttachment(file);
+        }
+        chatInputRef.current?.appendDraft(formatVisualEditPrompt(task));
+      } finally {
+        setVeBusy(false);
+        handleVeClose();
+      }
+    })();
+  }, [handleVeClose]);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
 
@@ -853,6 +1016,9 @@ export function WorkspaceShell({
                 onCollapse={handleToolbarCollapse}
                 onSend={handleToolbarSend}
                 hasSnapshot={!!snapshotByTab[activeTab.id]}
+                showVisualEdit={!!activeTab.url && !!getElectronVisualEdit()}
+                visualEditActive={veActive && veTabId === activeTab.id}
+                onToggleVisualEdit={handleToggleVisualEdit}
               />
             )}
             <EditorTabs
@@ -902,6 +1068,28 @@ export function WorkspaceShell({
                   onNavigate={handleTabNavigate}
                 />
               ))}
+
+              {/* Visual-edit inspector — docked on the right of the editor
+                  body. The active tab's WebContentsView is shrunk by
+                  VE_PANEL_WIDTH (bounds effect above) so this DOM panel isn't
+                  occluded by the composited-above view. */}
+              {veActive && veTabId === activeTab.id && (
+                <div className="ve-dock" style={{ width: VE_PANEL_WIDTH }}>
+                  <VisualEditorPanel
+                    pins={vePins}
+                    selectedN={veSelected}
+                    picking={vePicking}
+                    busy={veBusy}
+                    onSelectPin={setVeSelected}
+                    onRemovePin={handleVeRemovePin}
+                    onEdit={handleVeEdit}
+                    onSetNote={handleVeSetNote}
+                    onTogglePicking={handleVeTogglePicking}
+                    onApply={handleVeApply}
+                    onClose={handleVeClose}
+                  />
+                </div>
+              )}
             </div>
           </section>
 
