@@ -88,27 +88,31 @@ export function ChatSessions({
   onChangeProject,
   chatInputRef,
 }: ChatSessionsProps) {
-  const [snap, setSnap] = useState<SessionsSnapshot>(() =>
-    loadSnapshot(workingDirectory)
-  );
+  // Start from the default on BOTH server and the first client render —
+  // reading localStorage in the useState initializer made the first client
+  // render (persisted session titles) differ from the SSR HTML (default
+  // "Session 1"), a hydration mismatch. The persisted snapshot is loaded just
+  // after mount instead (effect below).
+  const [snap, setSnap] = useState<SessionsSnapshot>(defaultSnapshot);
+  const [hydrated, setHydrated] = useState(false);
   // Per-session in-flight flag, fed by each panel's onLoadingChange — drives
   // the running dot on background tabs.
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
 
-  // Reload the session set when the working directory changes (each project
-  // keeps its own tabs).
-  const lastCwdRef = useRef(workingDirectory);
+  // Load the persisted session set after mount, and reload it when the working
+  // directory changes (each project keeps its own tabs).
   useEffect(() => {
-    if (lastCwdRef.current === workingDirectory) return;
-    lastCwdRef.current = workingDirectory;
     setSnap(loadSnapshot(workingDirectory));
     setLoadingMap({});
+    setHydrated(true);
   }, [workingDirectory]);
 
-  // Persist on any change.
+  // Persist on any change — but not before the initial load, or the default
+  // first render would clobber the stored sessions.
   useEffect(() => {
+    if (!hydrated) return;
     saveSnapshot(workingDirectory, snap);
-  }, [workingDirectory, snap]);
+  }, [workingDirectory, snap, hydrated]);
 
   const activeIdRef = useRef(snap.activeId);
   activeIdRef.current = snap.activeId;
