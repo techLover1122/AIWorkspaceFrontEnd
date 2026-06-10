@@ -120,8 +120,6 @@ export function WorkspaceShell({
   // the toolbar button and the global drop handler both drive one pipeline.
   const projectUploadRef = useRef<ProjectUploadHandle>(null);
   const [dropActive, setDropActive] = useState(false);
-  // Counts dragenter/dragleave so nested children don't flicker the overlay.
-  const dragDepthRef = useRef(0);
 
   // Annotation snapshot — per-tab data URL of the screen-captured iframe
   // pixels. While this is set for a tab, the PreviewPane swaps the live
@@ -990,42 +988,56 @@ export function WorkspaceShell({
   }, []);
 
   /* ------------------------------------------------------------------
-     Global project drag-and-drop. Only reacts to OS file drags (the
-     "Files" type) — internal tab-reorder drags carry no files, so the
-     existing handleTabDrop path is left untouched.
+     Global project drag-and-drop.
+
+     The editor area is a cross-origin iframe (code-server / live preview),
+     which swallows drag events — so React handlers on the shell never fire
+     over the main area. Instead we listen at the WINDOW level: any file
+     drag arms a full-window overlay (pointer-events:auto) that sits ABOVE
+     the iframe and reliably catches the drop. A short no-dragover timeout
+     disarms the overlay so it can never get stuck blocking the UI.
+
+     Internal tab-reorder drags carry no "Files" type, so they're ignored
+     here and handleTabDrop is left untouched.
      ------------------------------------------------------------------ */
 
-  const dragHasFiles = (e: DragEvent<HTMLElement>): boolean =>
-    Array.from(e.dataTransfer?.types ?? []).includes("Files");
-
-  const handleWorkspaceDragEnter = useCallback((e: DragEvent<HTMLElement>) => {
-    if (!dragHasFiles(e)) return;
-    e.preventDefault();
-    dragDepthRef.current += 1;
+  const dropHideTimerRef = useRef<number | null>(null);
+  const armDropOverlay = useCallback(() => {
     setDropActive(true);
+    if (dropHideTimerRef.current != null) window.clearTimeout(dropHideTimerRef.current);
+    // dragover fires continuously while dragging; once it stops (drag ended
+    // or left the window) this fires and hides the overlay.
+    dropHideTimerRef.current = window.setTimeout(() => setDropActive(false), 200);
   }, []);
 
-  const handleWorkspaceDragOver = useCallback((e: DragEvent<HTMLElement>) => {
-    if (!dragHasFiles(e)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-  }, []);
+  useEffect(() => {
+    const hasFiles = (e: globalThis.DragEvent): boolean =>
+      Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
-  const handleWorkspaceDragLeave = useCallback((e: DragEvent<HTMLElement>) => {
-    if (!dragHasFiles(e)) return;
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) setDropActive(false);
-  }, []);
+    const onDragOver = (e: globalThis.DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault(); // mark as a valid drop target + stop the browser opening the file
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      armDropOverlay();
+    };
+    const onDrop = (e: globalThis.DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      if (dropHideTimerRef.current != null) window.clearTimeout(dropHideTimerRef.current);
+      setDropActive(false);
+      // Pass the native DataTransfer straight through — the component resolves
+      // webkitGetAsEntry() synchronously before any await.
+      if (e.dataTransfer) projectUploadRef.current?.handleDrop(e.dataTransfer);
+    };
 
-  const handleWorkspaceDrop = useCallback((e: DragEvent<HTMLElement>) => {
-    if (!dragHasFiles(e)) return;
-    e.preventDefault();
-    dragDepthRef.current = 0;
-    setDropActive(false);
-    // Pass the native DataTransfer straight through — the component resolves
-    // webkitGetAsEntry() synchronously before any await.
-    projectUploadRef.current?.handleDrop(e.dataTransfer);
-  }, []);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+      if (dropHideTimerRef.current != null) window.clearTimeout(dropHideTimerRef.current);
+    };
+  }, [armDropOverlay]);
 
   // Memoize the context value so we don't pass a fresh object literal
   // on every WorkspaceShell render — that would cascade through
@@ -1039,13 +1051,7 @@ export function WorkspaceShell({
 
   return (
     <WorkspaceTabContext.Provider value={tabContextValue}>
-    <main
-      className="app-shell"
-      onDragEnter={handleWorkspaceDragEnter}
-      onDragOver={handleWorkspaceDragOver}
-      onDragLeave={handleWorkspaceDragLeave}
-      onDrop={handleWorkspaceDrop}
-    >
+    <main className="app-shell">
       {dropActive && <ProjectDropOverlay />}
       <ProjectUpload ref={projectUploadRef} onChangeProject={onChangeProject} />
       <section className="workspace-frame">
@@ -1073,6 +1079,7 @@ export function WorkspaceShell({
                 activeTool={activeTool}
                 onChangeTool={handleChangeTool}
                 onReload={handleActiveTabReload}
+                onUploadProject={() => projectUploadRef.current?.openChooser()}
                 onCollapse={handleToolbarCollapse}
                 onSend={handleToolbarSend}
                 hasSnapshot={!!snapshotByTab[activeTab.id]}
