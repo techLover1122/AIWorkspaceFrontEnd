@@ -656,6 +656,23 @@ export function WorkspaceShell({
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
 
+  // When the upload modal opens in Electron, hide the active WebContentsView
+  // so it doesn't composite above the modal (OS-level compositor issue).
+  // Restore when the modal closes or is minimized to the toolbar.
+  const handleUploadModalOpen = useCallback(() => {
+    const etabs = getElectronTabs();
+    if (etabs && activeTab?.url) {
+      void etabs.setVisible(activeTab.id, false);
+    }
+  }, [activeTab]);
+
+  const handleUploadModalClose = useCallback(() => {
+    const etabs = getElectronTabs();
+    if (etabs && activeTab?.url) {
+      void etabs.setVisible(activeTab.id, true);
+    }
+  }, [activeTab]);
+
   const moveItem = <T,>(items: T[], fromIndex: number, toIndex: number) => {
     const nextItems = [...items];
     const [movedItem] = nextItems.splice(fromIndex, 1);
@@ -1060,6 +1077,9 @@ export function WorkspaceShell({
         workingDirectory={workingDirectory}
         onChangeProject={onChangeProject}
         onStatusChange={setUploadStatus}
+        onModalOpen={handleUploadModalOpen}
+        onModalClose={handleUploadModalClose}
+        onOpenPreview={(url) => handleOpenTab(url, uploadStatus?.projectName || "Preview")}
       />
       <section className="workspace-frame">
         <section

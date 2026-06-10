@@ -6526,6 +6526,15 @@ button {
   justify-content: flex-end;
   align-items: center;
 }
+
+.project-upload-foot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .project-upload-busy {
   font-size: 12px;
   color: var(--vsc-text-muted, #999);

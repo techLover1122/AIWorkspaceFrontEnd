@@ -56,6 +56,13 @@ type ProjectUploadProps = {
   onChangeProject?: (path: string) => void;
   /** Fires whenever the upload/run phase changes — drives the toolbar widget. */
   onStatusChange?: (status: UploadStatus) => void;
+  /** Called when the modal becomes visible — used to hide WebContentsView tabs
+   *  in Electron so the modal isn't obscured by the compositor. */
+  onModalOpen?: () => void;
+  /** Called when the modal is hidden — restores tab visibility. */
+  onModalClose?: () => void;
+  /** Called when the user clicks "Open Preview" after a successful run. */
+  onOpenPreview?: (url: string) => void;
 };
 
 type Phase = "idle" | "zipping" | "uploading" | "running" | "done" | "error";
@@ -63,7 +70,7 @@ type Phase = "idle" | "zipping" | "uploading" | "running" | "done" | "error";
 type LogLine = { id: number; text: string; kind: "log" | "info" | "error" };
 
 export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>(
-  function ProjectUpload({ workingDirectory, onChangeProject, onStatusChange }, ref) {
+  function ProjectUpload({ workingDirectory, onChangeProject, onStatusChange, onModalOpen, onModalClose, onOpenPreview }, ref) {
     const [open, setOpen] = useState(false);
     const [phase, setPhase] = useState<Phase>("idle");
     const [progress, setProgress] = useState(0);
@@ -96,6 +103,19 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
     useEffect(() => {
       onStatusChange?.({ phase, progress, projectName, previewUrl, error });
     }, [phase, progress, projectName, previewUrl, error, onStatusChange]);
+
+    // Hide the active Electron WebContentsView tab when the modal opens so it
+    // doesn't composite over the modal (WebContentsView renders above HTML at
+    // the OS compositor level). Restore when closed.
+    useEffect(() => {
+      if (open) {
+        onModalOpen?.();
+      } else {
+        onModalClose?.();
+      }
+    // onModalOpen/onModalClose are stable callbacks — only re-run when open changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
 
     const closeStream = useCallback(() => {
       esRef.current?.close();
@@ -432,8 +452,28 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
                           ? `Packaging… ${progress}%`
                           : phase === "uploading"
                           ? "Uploading…"
-                          : "Running…"}
+                          : "Running… (minimize to keep working)"}
                       </span>
+                    ) : phase === "done" && previewUrl ? (
+                      <div className="project-upload-foot-row">
+                        <button
+                          type="button"
+                          className="project-upload-btn primary"
+                          onClick={() => { onOpenPreview?.(previewUrl); setOpen(false); }}
+                        >
+                          ▶ Open Preview
+                        </button>
+                        <button type="button" className="project-upload-btn" onClick={() => reset()}>
+                          Upload another
+                        </button>
+                      </div>
+                    ) : phase === "done" ? (
+                      <div className="project-upload-foot-row">
+                        <span className="project-upload-busy">Done — no preview URL detected</span>
+                        <button type="button" className="project-upload-btn" onClick={() => reset()}>
+                          Upload another
+                        </button>
+                      </div>
                     ) : (
                       <button type="button" className="project-upload-btn" onClick={() => reset()}>
                         Upload another
