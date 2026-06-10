@@ -1,9 +1,23 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { WorkspaceShell } from "../components/workspace/workspace-shell";
 import { INSTANCE_IP } from "../constant/api";
+
+// Render the workspace CLIENT-ONLY (no SSR). This app only ever runs inside
+// the Electron desktop shell (or a browser pointed at the live workspace), so
+// server rendering buys nothing — and the entire tree depends on client-only
+// state (localStorage sessions, the Electron preload APIs, window geometry).
+// Disabling SSR here eliminates the whole class of hydration mismatches at the
+// root instead of guarding every server/client branch individually.
+const WorkspaceShell = dynamic(
+  () => import("../components/workspace/workspace-shell").then((m) => m.WorkspaceShell),
+  {
+    ssr: false,
+    loading: () => <div className="workspace-loading">Loading workspace...</div>,
+  }
+);
 import { base64UrlDecode, base64UrlEncode } from "../constant/utils";
 
 /**

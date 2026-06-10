@@ -41,6 +41,14 @@ type EditorOverlayToolbarProps = {
   /** Whether a snapshot is currently captured for this tab — controls
    *  whether Send + the discard-snapshot arrow are visible. */
   hasSnapshot?: boolean;
+  /** Show the live visual-edit tool button. Only true in the Electron
+   *  desktop app (the picker drives a CDP debugger on the tab's
+   *  WebContentsView — unavailable in a plain browser). */
+  showVisualEdit?: boolean;
+  /** Whether a visual-edit session is currently active for this tab. */
+  visualEditActive?: boolean;
+  /** Toggle the live visual editor on/off for the active tab. */
+  onToggleVisualEdit?: () => void;
   className?: string;
 };
 
@@ -74,6 +82,9 @@ export function EditorOverlayToolbar({
   onCollapse,
   onSend,
   hasSnapshot,
+  showVisualEdit = false,
+  visualEditActive = false,
+  onToggleVisualEdit,
   className,
 }: EditorOverlayToolbarProps) {
   // Collapsed mode — just the handle. The `.collapsed` modifier + the
@@ -178,6 +189,25 @@ export function EditorOverlayToolbar({
               </button>
             </>
           )}
+        </>
+      )}
+
+      {/* Live visual editor — distinct from the snapshot-based marker /
+          comments flow. Picks real DOM elements over CDP and edits them live;
+          Electron-only. */}
+      {showVisualEdit && (
+        <>
+          <div className="overlay-toolbar-divider" aria-hidden />
+          <button
+            type="button"
+            className={`overlay-toolbar-btn${visualEditActive ? " active" : ""}`}
+            onClick={onToggleVisualEdit}
+            title="Visual edit — point at elements and edit them live"
+            aria-label="Visual edit"
+            aria-pressed={visualEditActive}
+          >
+            <IconVisualEdit />
+          </button>
         </>
       )}
 
@@ -331,6 +361,16 @@ function IconSend() {
         strokeWidth="1.4"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+function IconVisualEdit() {
+  // Cursor pointing at a styled box — "edit the element you point at".
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="2" y="2" width="9" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M8.5 8.5l5 2-2 .8-.8 2z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
     </svg>
   );
 }

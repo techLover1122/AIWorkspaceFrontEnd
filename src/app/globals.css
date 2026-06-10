@@ -138,6 +138,9 @@ button {
   /* Default: editor | 4px splitter | chat (overridden by inline style from JS) */
   grid-template-columns: minmax(0, 1fr) 4px 380px;
   min-height: 0;
+  /* Positioning context for the visual-edit inspector (.ve-dock), which
+     overlays the chat-panel column on the right. */
+  position: relative;
 }
 
 /* ===== Splitter (VS Code-style draggable divider) ===== */
@@ -205,6 +208,8 @@ button {
   flex: 1;
   overflow: hidden;
   background: var(--vsc-bg);
+  /* Anchor for the docked visual-edit inspector (.ve-dock). */
+  position: relative;
 }
 
 /* ===== Editor overlay toolbar (port preview tools) ===== */
@@ -5813,3 +5818,373 @@ button {
   margin-top: 4px;
 }
 
+
+/* ============================================================
+   Visual-edit inspector (live visual editor tool)
+   Ported from the provided VisualEditor.jsx into the app's dark theme +
+   plain-CSS conventions. The numbered pin overlay lives in-page (injected
+   preview agent), not here — this is just the docked inspector panel.
+   ============================================================ */
+
+.ve-dock {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  background: var(--vsc-panel);
+  border-left: 1px solid var(--vsc-border-strong);
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.35);
+}
+
+.ve-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--vsc-text);
+}
+
+.ve-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--vsc-border-strong);
+}
+.ve-title { font-weight: 600; color: var(--vsc-text-emphasis); letter-spacing: 0.02em; }
+
+.ve-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: var(--vsc-text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.ve-icon-btn:hover { background: var(--vsc-hover); color: var(--vsc-text); }
+
+/* pin bar */
+.ve-pinbar {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--vsc-border-strong);
+}
+.ve-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--vsc-border-strong);
+  background: var(--vsc-input-bg);
+  color: var(--vsc-text);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.ve-pick-btn:hover { background: var(--vsc-hover); }
+.ve-pick-btn.active {
+  background: var(--vsc-accent-soft);
+  color: var(--vsc-text-link);
+  border-color: var(--vsc-accent);
+}
+.ve-pinlist { display: flex; flex-wrap: wrap; gap: 5px; }
+.ve-pinchip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 11px;
+  background: var(--vsc-input-bg);
+  border: 1px solid var(--vsc-border-strong);
+  overflow: hidden;
+}
+.ve-pinchip.active { border-color: var(--vsc-accent); background: var(--vsc-accent-soft); }
+.ve-pinchip.stale { opacity: 0.55; }
+.ve-pinchip-n {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  color: var(--vsc-text);
+  font: 600 11px/20px ui-monospace, monospace;
+  cursor: pointer;
+}
+.ve-pinchip.active .ve-pinchip-n { color: var(--vsc-text-link); }
+.ve-pinchip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--vsc-text-dim);
+  cursor: pointer;
+}
+.ve-pinchip-x:hover { color: var(--vsc-error); }
+
+/* scrolling inspector body */
+.ve-inspector-scroll { flex: 1; overflow-y: auto; }
+.ve-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  text-align: center;
+  padding: 24px 18px;
+  color: var(--vsc-text-dim);
+  line-height: 1.5;
+}
+
+.ve-el-id {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--vsc-divider);
+}
+.ve-tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--vsc-input-bg);
+  color: var(--vsc-text);
+  font: 600 11px/1.5 ui-monospace, monospace;
+}
+.ve-path {
+  flex: 1;
+  min-width: 0;
+  color: var(--vsc-text-dim);
+  font: 11px/1.5 ui-monospace, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ve-detached {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(204, 167, 0, 0.18);
+  color: var(--vsc-warning);
+  font-size: 10px;
+}
+
+/* sections + rows */
+.ve-section { padding: 10px; border-top: 1px solid var(--vsc-divider); }
+.ve-section:first-of-type { border-top: none; }
+.ve-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--vsc-text-muted);
+  margin-bottom: 8px;
+}
+.ve-section-body { display: flex; flex-direction: column; gap: 8px; }
+.ve-row { display: flex; align-items: center; gap: 8px; }
+.ve-row-label {
+  width: 62px;
+  flex-shrink: 0;
+  color: var(--vsc-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ve-row-label.edited { color: var(--vsc-text-link); font-weight: 500; }
+.ve-row-control { flex: 1; min-width: 0; }
+.ve-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--vsc-accent); }
+.ve-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* inputs */
+.ve-input {
+  width: 100%;
+  background: var(--vsc-input-bg);
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 5px;
+  padding: 5px 7px;
+  font: 12px/1.2 ui-monospace, monospace;
+  color: var(--vsc-text);
+  outline: none;
+}
+.ve-input:focus { border-color: var(--vsc-focus); }
+.ve-numfield { display: flex; gap: 5px; }
+.ve-num { flex: 1; }
+.ve-select {
+  width: 100%;
+  background: var(--vsc-input-bg);
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 5px;
+  padding: 5px 7px;
+  font-size: 12px;
+  color: var(--vsc-text);
+  outline: none;
+  cursor: pointer;
+}
+.ve-select:focus { border-color: var(--vsc-focus); }
+.ve-unit { flex: 0 0 auto; width: auto; padding: 5px 4px; color: var(--vsc-text-muted); }
+
+.ve-segmented {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--vsc-input-bg);
+  border-radius: 6px;
+}
+.ve-seg-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vsc-text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.ve-seg-btn:hover { color: var(--vsc-text); }
+.ve-seg-btn.active { background: var(--vsc-panel); color: var(--vsc-text-link); box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+
+.ve-colorfield { display: flex; gap: 5px; align-items: center; }
+.ve-swatch {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 5px;
+  border: 1px solid var(--vsc-border-strong);
+  overflow: hidden;
+  cursor: pointer;
+}
+.ve-swatch input[type="color"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+.ve-color-hex { text-transform: uppercase; }
+
+.ve-slider { display: flex; align-items: center; gap: 8px; }
+.ve-slider input[type="range"] { flex: 1; accent-color: var(--vsc-accent); height: 3px; }
+.ve-slider-val { width: 40px; text-align: right; font: 11px/1 ui-monospace, monospace; color: var(--vsc-text-muted); }
+
+/* box-model spacing editor */
+.ve-boxmodel {
+  border-radius: 8px;
+  padding: 9px;
+  text-align: center;
+  user-select: none;
+  background: rgba(245, 158, 11, 0.10);
+}
+.ve-bm-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; text-align: left; margin: 0 0 3px 3px; }
+.ve-bm-margin { color: rgba(245, 158, 11, 0.85); }
+.ve-bm-pad { color: rgba(16, 185, 129, 0.85); }
+.ve-bm-mid { display: flex; align-items: center; gap: 5px; }
+.ve-bm-padding { flex: 1; border-radius: 6px; padding: 9px; background: rgba(16, 185, 129, 0.12); }
+.ve-bm-core { flex: 1; border-radius: 4px; padding: 7px 0; background: rgba(55, 148, 255, 0.18); font: 10px/1 ui-monospace, monospace; color: var(--vsc-text-link); }
+.ve-edge {
+  width: 34px;
+  background: transparent;
+  text-align: center;
+  border: none;
+  color: var(--vsc-text);
+  font: 11px/1.4 ui-monospace, monospace;
+  outline: none;
+}
+.ve-edge:focus { color: var(--vsc-text-link); }
+
+/* note + annotations readout */
+.ve-note {
+  width: 100%;
+  resize: vertical;
+  background: var(--vsc-input-bg);
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 5px;
+  padding: 6px 7px;
+  font-size: 12px;
+  color: var(--vsc-text);
+  outline: none;
+}
+.ve-note:focus { border-color: var(--vsc-focus); }
+
+.ve-annotations { padding: 10px; border-top: 1px solid var(--vsc-divider); background: rgba(0,0,0,0.18); }
+.ve-annotations-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--vsc-text-muted);
+}
+.ve-annotations-count { font-family: ui-monospace, monospace; color: var(--vsc-text-dim); }
+.ve-annotations-empty { color: var(--vsc-text-dim); }
+.ve-annotations-list { display: flex; flex-direction: column; gap: 5px; max-height: 160px; overflow-y: auto; }
+.ve-annotation { display: flex; align-items: center; gap: 6px; font: 11px/1.4 ui-monospace, monospace; }
+.ve-anno-prop { width: 86px; flex-shrink: 0; color: var(--vsc-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ve-anno-from { color: var(--vsc-text-dim); text-decoration: line-through; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ve-anno-to { color: var(--vsc-text-link); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ve-svg { flex-shrink: 0; color: var(--vsc-text-dim); }
+
+/* footer */
+.ve-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--vsc-border-strong);
+}
+.ve-footer-count { font-size: 11px; color: var(--vsc-text-dim); }
+.ve-apply-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  background: var(--vsc-accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, opacity 120ms ease;
+}
+.ve-apply-btn:hover:not(:disabled) { background: var(--vsc-accent-hover); }
+.ve-apply-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* visual-edit mode bar (Pick / Note / Box / Pen) + shape chips */
+.ve-modebar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.ve-mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 2px;
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 6px;
+  background: var(--vsc-input-bg);
+  color: var(--vsc-text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.ve-mode-btn:hover { background: var(--vsc-hover); color: var(--vsc-text); }
+.ve-mode-btn.active {
+  background: var(--vsc-accent-soft);
+  color: var(--vsc-text-link);
+  border-color: var(--vsc-accent);
+}
+.ve-pinchip.shape .ve-pinchip-n { color: #ef9a9a; }
+.ve-pinchip.shape.active { border-color: #ef4444; background: rgba(239, 68, 68, 0.12); }
+.ve-pinchip.shape.active .ve-pinchip-n { color: #ef4444; }
