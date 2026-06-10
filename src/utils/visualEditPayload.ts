@@ -20,6 +20,11 @@ function describePin(p: Pin): string {
     const loc = fp.loc ? ` (source: ${fp.loc})` : "";
     const label = fp.text ? ` “${fp.text}”` : "";
     lines.push(`Pin ${p.n} — <${fp.tag}>${label} at \`${fp.path}\`${loc}${p.detached ? " [node was re-rendered; re-localize via fingerprint]" : ""}`);
+    if (p.annotation.remove) {
+      lines.push(`    • REMOVE this element entirely — delete it (and any now-dead wrappers/imports) from the source.`);
+      if (p.annotation.note) lines.push(`    • note: ${p.annotation.note}`);
+      return lines.join("\n");
+    }
     for (const [prop, d] of Object.entries(p.annotation.css)) {
       lines.push(`    • ${prop}: ${d.from} → ${d.to}`);
     }
@@ -49,7 +54,7 @@ function describePin(p: Pin): string {
 export function formatVisualEditPrompt(task: EditTask): string {
   const pins = task.annotations.filter((p) =>
     p.kind === "element"
-      ? Object.keys(p.annotation.css).length || p.annotation.text || p.annotation.note
+      ? Object.keys(p.annotation.css).length || p.annotation.text || p.annotation.note || p.annotation.remove
       : true
   );
   const body = pins.map(describePin).join("\n\n");

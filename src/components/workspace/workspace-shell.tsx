@@ -161,6 +161,13 @@ export function WorkspaceShell({
   const [veSelected, setVeSelected] = useState<number | null>(null);
   const [veMode, setVeMode] = useState<EditMode>("pick");
   const [veBusy, setVeBusy] = useState(false);
+  // Undo/redo availability (mirrors the host-side stacks) + a revision counter
+  // bumped on undo/redo so the inspector re-seeds. veTextEditing holds the pin
+  // currently being text-edited directly on the page.
+  const [veCanUndo, setVeCanUndo] = useState(false);
+  const [veCanRedo, setVeCanRedo] = useState(false);
+  const [veRev, setVeRev] = useState(0);
+  const [veTextEditing, setVeTextEditing] = useState<number | null>(null);
   const veActive = !!veSessionId;
   const veSessionRef = useRef<string | null>(null);
   veSessionRef.current = veSessionId;
@@ -540,6 +547,15 @@ export function WorkspaceShell({
         setVePins([]);
         setVeSelected(null);
       }),
+      ve.onTextEditEnd(({ sessionId }) => {
+        if (!here(sessionId)) return;
+        // On-page editing finished — clear the editing flag and re-seed the
+        // inspector so the Content field reflects the typed text.
+        setVeTextEditing(null);
+        setVeRev((r) => r + 1);
+        setVeCanUndo(true);
+        setVeCanRedo(false);
+      }),
     ];
     return () => unsubs.forEach((u) => u());
   }, []);
@@ -553,6 +569,9 @@ export function WorkspaceShell({
     setVePins([]);
     setVeSelected(null);
     setVeMode("pick");
+    setVeCanUndo(false);
+    setVeCanRedo(false);
+    setVeTextEditing(null);
   }, []);
 
   const handleToggleVisualEdit = useCallback(() => {
@@ -594,12 +613,81 @@ export function WorkspaceShell({
     const ve = getElectronVisualEdit();
     const sid = veSessionRef.current;
     if (!ve || !sid) return;
+    setVeCanUndo(true);
+    setVeCanRedo(false);
     void ve.applyEdit(sid, n, change).then((res) => {
       if (res?.annotation) {
         setVePins((prev) => prev.map((p) => (p.n === n && p.kind === "element" ? { ...p, annotation: res.annotation! } : p)));
       }
     });
   }, []);
+
+  const handleVeUndo = useCallback(() => {
+    const ve = getElectronVisualEdit();
+    const sid = veSessionRef.current;
+    if (!ve || !sid) return;
+    void ve.undo(sid).then((res) => {
+      if (!res?.pins) return;
+      setVePins(res.pins);
+      setVeRev((r) => r + 1);
+      setVeCanUndo(!!res.canUndo);
+      setVeCanRedo(!!res.canRedo);
+      setVeSelected((cur) => (cur && res.pins!.some((p) => p.n === cur) ? cur : res.pins![0]?.n ?? null));
+    });
+  }, []);
+
+  const handleVeRedo = useCallback(() => {
+    const ve = getElectronVisualEdit();
+    const sid = veSessionRef.current;
+    if (!ve || !sid) return;
+    void ve.redo(sid).then((res) => {
+      if (!res?.pins) return;
+      setVePins(res.pins);
+      setVeRev((r) => r + 1);
+      setVeCanUndo(!!res.canUndo);
+      setVeCanRedo(!!res.canRedo);
+      setVeSelected((cur) => (cur && res.pins!.some((p) => p.n === cur) ? cur : res.pins![0]?.n ?? null));
+    });
+  }, []);
+
+  const handleVeEditOnPage = useCallback((n: number) => {
+    const ve = getElectronVisualEdit();
+    const sid = veSessionRef.current;
+    if (!ve || !sid) return;
+    setVeTextEditing(n);
+    void ve.editText(sid, n, true).then((res) => {
+      if (res?.error) setVeTextEditing(null);
+    });
+  }, []);
+
+  const handleVeRemoveElement = useCallback((n: number, on: boolean) => {
+    const ve = getElectronVisualEdit();
+    const sid = veSessionRef.current;
+    if (!ve || !sid) return;
+    setVeCanUndo(true);
+    setVeCanRedo(false);
+    void ve.removeElement(sid, n, on).then((res) => {
+      if (res?.annotation) {
+        setVePins((prev) => prev.map((p) => (p.n === n && p.kind === "element" ? { ...p, annotation: res.annotation! } : p)));
+      }
+    });
+  }, []);
+
+  // Undo/redo keyboard shortcuts while a visual-edit session is active. Skipped
+  // when focus is in a text field so native text undo still works there.
+  useEffect(() => {
+    if (!veActive) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) { e.preventDefault(); handleVeUndo(); }
+      else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); handleVeRedo(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [veActive, handleVeUndo, handleVeRedo]);
 
   const handleVeRemovePin = useCallback((n: number) => {
     const ve = getElectronVisualEdit();
@@ -1198,11 +1286,19 @@ export function WorkspaceShell({
                 selectedN={veSelected}
                 mode={veMode}
                 busy={veBusy}
+                rev={veRev}
+                canUndo={veCanUndo}
+                canRedo={veCanRedo}
+                textEditingN={veTextEditing}
                 onSelectPin={setVeSelected}
                 onRemovePin={handleVeRemovePin}
                 onEdit={handleVeEdit}
                 onSetNote={handleVeSetNote}
                 onSetMode={handleVeSetMode}
+                onEditOnPage={handleVeEditOnPage}
+                onRemoveElement={handleVeRemoveElement}
+                onUndo={handleVeUndo}
+                onRedo={handleVeRedo}
                 onApply={handleVeApply}
                 onClose={handleVeClose}
               />

@@ -5960,6 +5960,55 @@ button {
   transition: background 120ms ease, color 120ms ease;
 }
 .ve-icon-btn:hover { background: var(--vsc-hover); color: var(--vsc-text); }
+.ve-icon-btn:disabled { opacity: 0.35; cursor: default; }
+.ve-icon-btn:disabled:hover { background: transparent; color: var(--vsc-text-muted); }
+.ve-header-actions { display: inline-flex; align-items: center; gap: 2px; }
+
+/* remove-element (danger) + on-page text edit */
+.ve-remove-el {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 5px 10px;
+  width: 100%;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--vsc-error) 45%, transparent);
+  background: color-mix(in srgb, var(--vsc-error) 12%, transparent);
+  color: var(--vsc-error);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.ve-remove-el:hover { background: color-mix(in srgb, var(--vsc-error) 22%, transparent); }
+.ve-remove-el.undo {
+  border-color: var(--vsc-border-strong);
+  background: var(--vsc-hover);
+  color: var(--vsc-text);
+}
+.ve-content-head { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+.ve-text-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--vsc-border-strong);
+  background: var(--vsc-hover);
+  color: var(--vsc-text);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.ve-text-edit-btn:hover:not(:disabled) { background: var(--bot-accent-soft); color: var(--bot-accent); }
+.ve-text-edit-btn.active, .ve-text-edit-btn:disabled {
+  background: var(--bot-accent-soft);
+  color: var(--bot-accent);
+  cursor: default;
+}
 
 /* pin bar */
 .ve-pinbar {

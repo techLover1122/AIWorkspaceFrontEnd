@@ -23,6 +23,8 @@ export type PinAnnotation = {
   css: Record<string, { from: string; to: string }>;
   text?: { from: string; to: string };
   note?: string;
+  /** Element marked for deletion — the agent removes it from source. */
+  remove?: boolean;
 };
 
 /** An element pin — precise CSS/text edits localized to one DOM node. */
@@ -82,6 +84,12 @@ export type ElectronVisualEdit = {
   ) => Promise<{ ok?: boolean; annotation?: PinAnnotation; error?: string }>;
   setNote: (sessionId: string, n: number, note: string) => Promise<{ ok?: boolean; error?: string }>;
   removePin: (sessionId: string, n: number) => Promise<{ ok?: boolean; pins?: Pin[]; error?: string }>;
+  /** Toggle direct on-page text editing (contentEditable) for an element pin. */
+  editText: (sessionId: string, n: number, on: boolean) => Promise<{ ok?: boolean; editing?: number | null; error?: string }>;
+  /** Mark/unmark an element pin for deletion. */
+  removeElement: (sessionId: string, n: number, on: boolean) => Promise<{ ok?: boolean; annotation?: PinAnnotation; error?: string }>;
+  undo: (sessionId: string) => Promise<{ ok?: boolean; pins?: Pin[]; canUndo?: boolean; canRedo?: boolean }>;
+  redo: (sessionId: string) => Promise<{ ok?: boolean; pins?: Pin[]; canUndo?: boolean; canRedo?: boolean }>;
   pausePicking: (sessionId: string) => Promise<unknown>;
   resumePicking: (sessionId: string) => Promise<unknown>;
   setMode: (sessionId: string, mode: EditMode) => Promise<{ ok?: boolean; mode?: EditMode }>;
@@ -93,6 +101,8 @@ export type ElectronVisualEdit = {
   onPinDetached: (cb: (e: { sessionId: string; n: number; detached: boolean }) => void) => () => void;
   onRenumbered: (cb: (e: { sessionId: string; pins: Pin[] }) => void) => () => void;
   onReset: (cb: (e: { sessionId: string }) => void) => () => void;
+  /** Fires when on-page text editing finishes (Enter / Esc / blur). */
+  onTextEditEnd: (cb: (e: { sessionId: string; n: number }) => void) => () => void;
 };
 
 export function getElectronVisualEdit(): ElectronVisualEdit | null {

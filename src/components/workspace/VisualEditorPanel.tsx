@@ -328,11 +328,14 @@ function BoxModel({ f, set }: { f: Fields; set: (k: keyof Fields, v: string) => 
 /* ─────────────────────── per-pin inspector ─────────────────────── */
 
 function PinInspector({
-  pin, onEdit, onSetNote,
+  pin, onEdit, onSetNote, onEditOnPage, onRemoveElement, textEditing,
 }: {
   pin: ElementPin;
   onEdit: (change: EditChange) => void;
   onSetNote: (note: string) => void;
+  onEditOnPage: () => void;
+  onRemoveElement: (on: boolean) => void;
+  textEditing: boolean;
 }) {
   // Seed from the pin's computed styles, then overlay any already-recorded
   // edits so switching back to a pin shows its current state.
@@ -384,6 +387,10 @@ function PinInspector({
 
   const a = pin.annotation;
   const edited = (...props: string[]) => props.some((p) => p in a.css);
+  // SVG/icon elements have no meaningful CSS typography — hide that section so
+  // the inspector only offers icon-relevant controls (fill/stroke/size).
+  const isSvgIcon = SVG_TAGS.includes(pin.fingerprint.tag);
+  const removed = !!a.remove;
 
   return (
     <div className="ve-inspector-scroll">
@@ -392,6 +399,16 @@ function PinInspector({
         <span className="ve-path" title={pin.fingerprint.path}>{pin.fingerprint.path}</span>
         {pin.detached && <span className="ve-detached" title="This element was replaced by a re-render">stale</span>}
       </div>
+
+      <button
+        type="button"
+        className={`ve-remove-el${removed ? " undo" : ""}`}
+        onClick={() => onRemoveElement(!removed)}
+        title={removed ? "Restore this element" : "Remove this element from the page (deletes it in source)"}
+      >
+        {removed ? <><IconArrowRight /> Restore element</> : <><IconTrash /> Remove element</>}
+      </button>
+      {removed && <p className="ve-annotations-empty">Marked for deletion — the agent will remove it from the source.</p>}
 
       <Section title="Layout">
         <Row label="Width" edited={edited("width")}><NumberField value={f.width} onChange={(v) => set("width", v)} /></Row>
@@ -433,6 +450,7 @@ function PinInspector({
         )}
       </Section>
 
+      {!isSvgIcon && (
       <Section title="Typography">
         <Row label="Size" edited={edited("fontSize")}><NumberField value={f.fontSize} onChange={(v) => set("fontSize", v)} units={["px", "rem", "em"]} /></Row>
         <Row label="Weight" edited={edited("fontWeight")}>
@@ -448,6 +466,7 @@ function PinInspector({
         </Row>
         <Row label="Color" edited={edited("color")}><ColorField value={f.color} onChange={(v) => set("color", v)} /></Row>
       </Section>
+      )}
 
       <Section title="Background">
         <Row label="Fill" edited={edited("backgroundColor")}><ColorField value={f.backgroundColor} onChange={(v) => set("backgroundColor", v)} /></Row>
@@ -486,16 +505,35 @@ function PinInspector({
 
       <Section title="Content">
         {pin.textEditable ? (
-          <textarea
-            className="ve-note"
-            placeholder="Element text…"
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              onEdit({ kind: "text", value: e.target.value, from: pin.text ?? "" });
-            }}
-            rows={2}
-          />
+          <>
+            <div className="ve-content-head">
+              <button
+                type="button"
+                className={`ve-text-edit-btn${textEditing ? " active" : ""}`}
+                onClick={onEditOnPage}
+                disabled={textEditing}
+                title="Click into the element on the page and type directly"
+              >
+                <IconPencil /> {textEditing ? "Editing on page…" : "Edit on page"}
+              </button>
+            </div>
+            {textEditing ? (
+              <p className="ve-annotations-empty">
+                Type directly on the element — press Enter or Esc (or click away) to finish.
+              </p>
+            ) : (
+              <textarea
+                className="ve-note"
+                placeholder="Element text…"
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  onEdit({ kind: "text", value: e.target.value, from: pin.text ?? "" });
+                }}
+                rows={2}
+              />
+            )}
+          </>
         ) : (
           <p className="ve-annotations-empty">
             This element has child elements — edit its text on the specific leaf you pinned.
@@ -595,11 +633,19 @@ export function VisualEditorPanel({
   selectedN,
   mode,
   busy,
+  rev,
+  canUndo,
+  canRedo,
+  textEditingN,
   onSelectPin,
   onRemovePin,
   onEdit,
   onSetNote,
   onSetMode,
+  onEditOnPage,
+  onRemoveElement,
+  onUndo,
+  onRedo,
   onApply,
   onClose,
 }: {
@@ -607,11 +653,21 @@ export function VisualEditorPanel({
   selectedN: number | null;
   mode: EditMode;
   busy?: boolean;
+  /** Bumped on undo/redo to force the inspector to re-seed from the new state. */
+  rev: number;
+  canUndo: boolean;
+  canRedo: boolean;
+  /** Pin currently being text-edited directly on the page, if any. */
+  textEditingN: number | null;
   onSelectPin: (n: number) => void;
   onRemovePin: (n: number) => void;
   onEdit: (n: number, change: EditChange) => void;
   onSetNote: (n: number, note: string) => void;
   onSetMode: (mode: EditMode) => void;
+  onEditOnPage: (n: number) => void;
+  onRemoveElement: (n: number, on: boolean) => void;
+  onUndo: () => void;
+  onRedo: () => void;
   onApply: () => void;
   onClose: () => void;
 }) {
@@ -626,7 +682,11 @@ export function VisualEditorPanel({
     <aside className="ve-panel" aria-label="Visual editor inspector">
       <header className="ve-header">
         <span className="ve-title">Visual Edit</span>
-        <button type="button" className="ve-icon-btn" title="Close" onClick={onClose}><IconClose /></button>
+        <div className="ve-header-actions">
+          <button type="button" className="ve-icon-btn" title="Undo (Ctrl+Z)" onClick={onUndo} disabled={!canUndo}><IconUndo /></button>
+          <button type="button" className="ve-icon-btn" title="Redo (Ctrl+Y)" onClick={onRedo} disabled={!canRedo}><IconRedo /></button>
+          <button type="button" className="ve-icon-btn" title="Close" onClick={onClose}><IconClose /></button>
+        </div>
       </header>
 
       <div className="ve-pinbar">
@@ -669,10 +729,13 @@ export function VisualEditorPanel({
       {selected ? (
         selected.kind === "element" ? (
           <PinInspector
-            key={selected.n}
+            key={`${selected.n}:${rev}`}
             pin={selected}
             onEdit={(change) => onEdit(selected.n, change)}
             onSetNote={(note) => onSetNote(selected.n, note)}
+            onEditOnPage={() => onEditOnPage(selected.n)}
+            onRemoveElement={(on) => onRemoveElement(selected.n, on)}
+            textEditing={textEditingN === selected.n}
           />
         ) : (
           <ShapeInspector key={selected.n} pin={selected} onSetNote={(note) => onSetNote(selected.n, note)} />
@@ -720,6 +783,18 @@ function IconAlign({ a }: { a: "left" | "center" | "right" | "justify" }) {
 }
 function IconClose() {
   return <svg className="ve-svg" viewBox="0 0 16 16" width="11" height="11" aria-hidden><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>;
+}
+function IconUndo() {
+  return <svg className="ve-svg" viewBox="0 0 16 16" width="13" height="13" aria-hidden><path d="M6 4L2.5 7.5 6 11M2.5 7.5H10a3.5 3.5 0 0 1 0 7H7" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+function IconRedo() {
+  return <svg className="ve-svg" viewBox="0 0 16 16" width="13" height="13" aria-hidden><path d="M10 4l3.5 3.5L10 11M13.5 7.5H6a3.5 3.5 0 0 0 0 7h3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+function IconTrash() {
+  return <svg className="ve-svg" viewBox="0 0 16 16" width="12" height="12" aria-hidden><path d="M3 4.5h10M6 4.5V3h4v1.5M4.5 4.5l.5 8.5a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1l.5-8.5M6.5 7v4M9.5 7v4" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}
+function IconPencil() {
+  return <svg className="ve-svg" viewBox="0 0 16 16" width="12" height="12" aria-hidden><path d="M11.5 2.5l2 2L6 12l-2.5.5L4 10l7.5-7.5z" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinejoin="round" /></svg>;
 }
 function IconTarget() {
   return <svg className="ve-svg" viewBox="0 0 16 16" width="13" height="13" aria-hidden><circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.4" fill="none" /><circle cx="8" cy="8" r="1.6" fill="currentColor" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>;
