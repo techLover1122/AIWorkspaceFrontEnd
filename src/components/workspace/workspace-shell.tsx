@@ -13,6 +13,7 @@ import {
   ProjectUpload,
   ProjectDropOverlay,
   type ProjectUploadHandle,
+  type UploadStatus,
 } from "./project-upload";
 import {
   PreviewPane,
@@ -120,6 +121,7 @@ export function WorkspaceShell({
   // the toolbar button and the global drop handler both drive one pipeline.
   const projectUploadRef = useRef<ProjectUploadHandle>(null);
   const [dropActive, setDropActive] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null);
 
   // Annotation snapshot — per-tab data URL of the screen-captured iframe
   // pixels. While this is set for a tab, the PreviewPane swaps the live
@@ -1053,7 +1055,12 @@ export function WorkspaceShell({
     <WorkspaceTabContext.Provider value={tabContextValue}>
     <main className="app-shell">
       {dropActive && <ProjectDropOverlay />}
-      <ProjectUpload ref={projectUploadRef} onChangeProject={onChangeProject} />
+      <ProjectUpload
+        ref={projectUploadRef}
+        workingDirectory={workingDirectory}
+        onChangeProject={onChangeProject}
+        onStatusChange={setUploadStatus}
+      />
       <section className="workspace-frame">
         <section
           ref={workspaceRef}
@@ -1090,6 +1097,15 @@ export function WorkspaceShell({
                 showVisualEdit={!!activeTab.url && veAvailable}
                 visualEditActive={veActive && veTabId === activeTab.id}
                 onToggleVisualEdit={handleToggleVisualEdit}
+                uploadStatus={uploadStatus ?? undefined}
+                onUploadWidgetClick={() => {
+                  if (uploadStatus?.previewUrl) {
+                    handleOpenTab(uploadStatus.previewUrl, uploadStatus.projectName || "Preview");
+                  } else {
+                    projectUploadRef.current?.reopen();
+                  }
+                }}
+                onUploadWidgetDismiss={() => projectUploadRef.current?.dismiss()}
               />
             )}
             <EditorTabs

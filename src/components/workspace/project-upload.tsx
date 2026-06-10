@@ -36,10 +36,26 @@ export type ProjectUploadHandle = {
   openChooser: () => void;
   /** Start the pipeline from a drag-and-drop DataTransfer. */
   handleDrop: (dataTransfer: DataTransfer) => void;
+  /** Re-open the modal without resetting state (use while a run is in progress). */
+  reopen: () => void;
+  /** Clear a finished/errored run from the toolbar widget. */
+  dismiss: () => void;
+};
+
+export type UploadStatus = {
+  phase: Phase;
+  progress: number;
+  projectName: string;
+  previewUrl: string | null;
+  error: string | null;
 };
 
 type ProjectUploadProps = {
+  /** Current IDE working directory; uploads extract into a subfolder here. */
+  workingDirectory?: string;
   onChangeProject?: (path: string) => void;
+  /** Fires whenever the upload/run phase changes — drives the toolbar widget. */
+  onStatusChange?: (status: UploadStatus) => void;
 };
 
 type Phase = "idle" | "zipping" | "uploading" | "running" | "done" | "error";
@@ -47,11 +63,12 @@ type Phase = "idle" | "zipping" | "uploading" | "running" | "done" | "error";
 type LogLine = { id: number; text: string; kind: "log" | "info" | "error" };
 
 export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>(
-  function ProjectUpload({ onChangeProject }, ref) {
+  function ProjectUpload({ workingDirectory, onChangeProject, onStatusChange }, ref) {
     const [open, setOpen] = useState(false);
     const [phase, setPhase] = useState<Phase>("idle");
     const [progress, setProgress] = useState(0);
     const [projectName, setProjectName] = useState<string>("");
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [logs, setLogs] = useState<LogLine[]>([]);
     const [error, setError] = useState<string | null>(null);
 
@@ -75,6 +92,11 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
       if (el) el.scrollTop = el.scrollHeight;
     }, [logs]);
 
+    // Mirror state up to the toolbar widget.
+    useEffect(() => {
+      onStatusChange?.({ phase, progress, projectName, previewUrl, error });
+    }, [phase, progress, projectName, previewUrl, error, onStatusChange]);
+
     const closeStream = useCallback(() => {
       esRef.current?.close();
       esRef.current = null;
@@ -85,6 +107,7 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
       setPhase("idle");
       setProgress(0);
       setProjectName("");
+      setPreviewUrl(null);
       setLogs([]);
       setError(null);
     }, [closeStream]);
@@ -122,6 +145,7 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
                 break;
               case "port":
                 pushLog(`Preview ready at ${e.url} — opening tab…`, "info");
+                if (e.url) setPreviewUrl(e.url);
                 break;
               case "log":
                 if (e.data) pushLog(e.data, "log");
@@ -166,7 +190,7 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
           // 1) Upload the zip bytes.
           setPhase("uploading");
           setProgress(0);
-          const res = await fetch(uploadProjectUrl(built.suggestedName), {
+          const res = await fetch(uploadProjectUrl(built.suggestedName, workingDirectory), {
             method: "POST",
             headers: { "Content-Type": "application/zip" },
             body: built.zipBlob,
@@ -180,9 +204,9 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
 
           setProjectName(uploaded.name);
           pushLog(`Uploaded → ${uploaded.projectPath}`, "info");
-
-          // 2) Switch the workspace to the new project (code-server + chat cwd).
-          onChangeProject?.(uploaded.projectPath);
+          // Note: we intentionally do NOT call onChangeProject here — uploading a
+          // project should not re-root the workspace. The new folder appears in
+          // the current working directory without navigating away.
 
           // 3) Kick off the run and stream its output.
           setPhase("running");
@@ -240,6 +264,8 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
             buildZipFromDrop(dataTransfer, (pct) => setProgress(pct))
           );
         },
+        reopen: () => setOpen(true),
+        dismiss: () => reset(),
       }),
       [phase, reset, startFromBuilder]
     );
@@ -310,17 +336,34 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
                     ? `Project: ${projectName}`
                     : "Upload a project"}
                 </span>
-                <button
-                  type="button"
-                  className="project-upload-close"
-                  onClick={closeModal}
-                  aria-label="Close"
-                  title="Close"
-                >
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
-                    <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                  </svg>
-                </button>
+                <div className="project-upload-head-actions">
+                  {/* Minimize — hides the modal but keeps the run going; the
+                      toolbar widget stays live and shows progress. */}
+                  {busy && (
+                    <button
+                      type="button"
+                      className="project-upload-close"
+                      onClick={() => setOpen(false)}
+                      aria-label="Minimize to toolbar"
+                      title="Minimize to toolbar — run continues in the background"
+                    >
+                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
+                        <path d="M3 8h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="project-upload-close"
+                    onClick={closeModal}
+                    aria-label="Close"
+                    title="Close"
+                  >
+                    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
+                      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
               </div>
 
               {phase === "idle" && (

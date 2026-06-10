@@ -1,6 +1,7 @@
 "use client";
 
 import { useTunnelStatus, type TunnelStatusValue } from "../../utils/electronTunnel";
+import type { UploadStatus } from "./project-upload";
 
 export type EditorOverlayTool = "pointer" | "comments";
 
@@ -53,6 +54,13 @@ type EditorOverlayToolbarProps = {
   visualEditActive?: boolean;
   /** Toggle the live visual editor on/off for the active tab. */
   onToggleVisualEdit?: () => void;
+  /** Current upload/run status — drives the toolbar widget left of the tunnel dot. */
+  uploadStatus?: UploadStatus;
+  /** Called when the widget is clicked: re-opens the modal while busy, or opens
+   *  the preview tab once the dev server is up. */
+  onUploadWidgetClick?: () => void;
+  /** Called when the user dismisses (✕) a finished/errored widget. */
+  onUploadWidgetDismiss?: () => void;
   className?: string;
 };
 
@@ -90,6 +98,9 @@ export function EditorOverlayToolbar({
   showVisualEdit = false,
   visualEditActive = false,
   onToggleVisualEdit,
+  uploadStatus,
+  onUploadWidgetClick,
+  onUploadWidgetDismiss,
   className,
 }: EditorOverlayToolbarProps) {
   // Collapsed mode — just the handle. The `.collapsed` modifier + the
@@ -121,6 +132,18 @@ export function EditorOverlayToolbar({
 
   return (
     <div className={`editor-overlay-toolbar${className ? ` ${className}` : ""}`}>
+      {/* Upload/run status widget — leftmost element. Shows a ring while
+          uploading, a play icon when the dev server is ready, or an error
+          dot on failure. Clicking re-opens the modal or opens the preview
+          tab; the ✕ dismisses a finished/errored run. */}
+      {uploadStatus && uploadStatus.phase !== "idle" && (
+        <UploadRunWidget
+          status={uploadStatus}
+          onClick={onUploadWidgetClick}
+          onDismiss={onUploadWidgetDismiss}
+        />
+      )}
+
       {/* Phase 6 — tunnel status dot. Sits on the left of the toolbar so
           it never collides with the right-aligned annotation tools. Hidden
           in non-Electron contexts. */}
@@ -244,6 +267,103 @@ export function EditorOverlayToolbar({
       >
         <IconChevronRight />
       </button>
+    </div>
+  );
+}
+
+/* ============================================================
+   Upload / run status widget
+   ============================================================ */
+
+function UploadRunWidget({
+  status,
+  onClick,
+  onDismiss,
+}: {
+  status: UploadStatus;
+  onClick?: () => void;
+  onDismiss?: () => void;
+}) {
+  const { phase, progress, projectName, previewUrl, error } = status;
+
+  // Determinate progress ring (used while zipping: we have a real %).
+  // Circle r=5 → circumference ≈ 31.4.
+  const CIRC = 31.4;
+  const offset = phase === "zipping" ? CIRC * (1 - progress / 100) : 0;
+
+  const isReady = phase === "done" && !!previewUrl;
+  const isError = phase === "error";
+  const isBusy = phase === "zipping" || phase === "uploading" || phase === "running";
+
+  let label = "";
+  if (phase === "zipping") label = `Packaging ${projectName}… ${progress}%`;
+  else if (phase === "uploading") label = `Uploading ${projectName}…`;
+  else if (phase === "running") label = `Running ${projectName}…`;
+  else if (isReady) label = `${projectName} ready — click to open preview`;
+  else if (isError) label = `Upload failed: ${error ?? "unknown error"} — click to reopen`;
+  else if (phase === "done") label = `${projectName} done`;
+
+  const widgetClass = [
+    "overlay-upload-widget",
+    isReady ? "ready" : "",
+    isError ? "error" : "",
+    isBusy ? "busy" : "",
+  ].filter(Boolean).join(" ");
+
+  return (
+    <div className="overlay-upload-widget-wrap">
+      <button
+        type="button"
+        className={widgetClass}
+        onClick={onClick}
+        title={label}
+        aria-label={label}
+      >
+        {isReady ? (
+          <IconPlay />
+        ) : isError ? (
+          <IconAlertDot />
+        ) : (
+          // Ring: determinate while zipping, spinning while uploading/running.
+          <svg
+            viewBox="0 0 16 16"
+            width="16"
+            height="16"
+            fill="none"
+            aria-hidden
+            className={isBusy && phase !== "zipping" ? "overlay-upload-spin" : undefined}
+          >
+            {/* Track */}
+            <circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="2" opacity="0.25" />
+            {/* Fill */}
+            <circle
+              cx="8"
+              cy="8"
+              r="5"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeDasharray={`${CIRC} ${CIRC}`}
+              strokeDashoffset={phase === "zipping" ? offset : 0}
+              style={{ transformOrigin: "8px 8px", transform: "rotate(-90deg)" }}
+            />
+          </svg>
+        )}
+      </button>
+      {/* Dismiss button — shown on hover via CSS for done/error states. */}
+      {!isBusy && (
+        <button
+          type="button"
+          className="overlay-upload-dismiss"
+          onClick={(e) => { e.stopPropagation(); onDismiss?.(); }}
+          title="Dismiss"
+          aria-label="Dismiss upload status"
+        >
+          <svg viewBox="0 0 10 10" width="8" height="8" fill="none" aria-hidden>
+            <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
@@ -429,6 +549,24 @@ function IconComments() {
       <circle cx="6" cy="7.5" r="0.9" fill="currentColor" />
       <circle cx="8" cy="7.5" r="0.9" fill="currentColor" />
       <circle cx="10" cy="7.5" r="0.9" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconPlay() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M5 3.5l8 4.5-8 4.5V3.5z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconAlertDot() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 5v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="8" cy="11" r="0.9" fill="currentColor" />
     </svg>
   );
 }

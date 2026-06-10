@@ -319,6 +319,96 @@ button {
   height: 14px;
 }
 
+/* ── Upload/run toolbar widget ────────────────────────────── */
+
+.overlay-upload-widget-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+}
+
+.overlay-upload-widget {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--vsc-text-muted);
+  padding: 0;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.overlay-upload-widget:hover {
+  background: var(--vsc-hover);
+  color: var(--vsc-text-emphasis);
+}
+
+.overlay-upload-widget.busy {
+  color: var(--bot-accent, #a78bfa);
+}
+
+.overlay-upload-widget.ready {
+  color: #22c55e;
+}
+
+.overlay-upload-widget.ready:hover {
+  background: color-mix(in srgb, #22c55e 18%, transparent);
+  color: #22c55e;
+}
+
+.overlay-upload-widget.error {
+  color: #ef4444;
+}
+
+.overlay-upload-widget.error:hover {
+  background: color-mix(in srgb, #ef4444 18%, transparent);
+  color: #ef4444;
+}
+
+/* Dismiss ✕ — hidden until hover over the wrapper */
+.overlay-upload-dismiss {
+  display: none;
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  background: var(--vsc-panel, #1f1f1f);
+  border: 1px solid var(--vsc-border-strong);
+  border-radius: 50%;
+  color: var(--vsc-text-muted);
+  padding: 0;
+  cursor: pointer;
+  transition: color 100ms ease;
+  line-height: 1;
+}
+
+.overlay-upload-widget-wrap:hover .overlay-upload-dismiss {
+  display: inline-flex;
+}
+
+.overlay-upload-dismiss:hover {
+  color: var(--vsc-text-emphasis);
+}
+
+/* Indeterminate spin animation for upload/run phase */
+@keyframes overlay-spin {
+  to { transform: rotate(360deg); }
+}
+
+.overlay-upload-spin {
+  animation: overlay-spin 900ms linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
 .overlay-toolbar-divider {
   width: 1px;
   height: 16px;
@@ -6261,6 +6351,12 @@ button {
   font-size: 14px;
   font-weight: 600;
   color: var(--vsc-text-emphasis, #eee);
+}
+
+.project-upload-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .project-upload-close {
