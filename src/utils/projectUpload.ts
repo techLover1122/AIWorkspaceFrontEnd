@@ -1,18 +1,14 @@
 /**
- * Client-side project packaging.
+ * File/folder collection utilities for the upload panel.
  *
- * The backend runs remote, so we can't hand it a local path — we ship bytes.
- * To keep the server side to a single code path, the frontend ALWAYS produces
- * a zip:
- *   - a dropped `.zip`        → passed through unchanged
- *   - a dropped/picked folder → zipped here with JSZip
- *
- * Heavy / generated dirs (node_modules, .git, …) are skipped so the upload
- * stays small and reliable; the server reinstalls deps fresh.
+ * Collects files together with their relative paths so the backend can
+ * reconstruct the directory structure under the target working directory.
+ * No zipping, no project detection, no running — just bytes + paths.
  */
-import JSZip from "jszip";
 
-/** Directory names skipped at every level when zipping a folder. */
+export type FileEntry = { file: File; path: string };
+
+/** Directory names skipped at every level. */
 const IGNORE_DIRS = new Set([
   "node_modules",
   ".git",
@@ -32,196 +28,100 @@ const IGNORE_DIRS = new Set([
 
 const IGNORE_FILES = new Set([".DS_Store", "Thumbs.db"]);
 
-export type BuiltZip = {
-  /** The zip bytes to upload (a Blob/File). */
-  zipBlob: Blob;
-  /** Cleaned-up base name to suggest as the project name. */
-  suggestedName: string;
-  /** Number of files included (0 for a passthrough zip — unknown). */
-  fileCount: number;
-  /** True when the user dropped a ready-made .zip we passed through. */
-  passthrough: boolean;
-};
-
-function isZipFile(file: File): boolean {
-  return /\.zip$/i.test(file.name) || file.type === "application/zip" || file.type === "application/x-zip-compressed";
-}
-
-function shouldSkipPath(relPath: string): boolean {
+function shouldSkip(relPath: string): boolean {
   const segments = relPath.split("/");
   const fileName = segments[segments.length - 1];
   if (IGNORE_FILES.has(fileName)) return true;
-  // Skip if any directory segment is in the ignore list.
   return segments.slice(0, -1).some((seg) => IGNORE_DIRS.has(seg));
 }
 
-/* ───────── FileSystemEntry helpers (drag-and-drop) ───────── */
+/* ── FileSystemEntry helpers (drag-and-drop) ── */
 
-type FsEntry = {
-  isFile: boolean;
-  isDirectory: boolean;
-  name: string;
-  fullPath: string;
-};
-type FsFileEntry = FsEntry & { file: (cb: (f: File) => void, err: (e: unknown) => void) => void };
-type FsDirEntry = FsEntry & {
-  createReader: () => { readEntries: (cb: (entries: FsEntry[]) => void, err: (e: unknown) => void) => void };
-};
-
-function readFile(entry: FsFileEntry): Promise<File> {
-  return new Promise((resolve, reject) => entry.file(resolve, reject));
-}
-
-/** readEntries returns at most ~100 entries per call — loop until empty. */
-function readAllEntries(dir: FsDirEntry): Promise<FsEntry[]> {
-  const reader = dir.createReader();
-  const all: FsEntry[] = [];
-  return new Promise((resolve, reject) => {
-    const pump = () => {
-      reader.readEntries((entries) => {
-        if (entries.length === 0) {
-          resolve(all);
-          return;
-        }
-        all.push(...entries);
-        pump();
-      }, reject);
-    };
-    pump();
-  });
-}
-
-/**
- * Recursively add a FileSystemEntry tree to the zip. `prefix` is the path
- * already consumed (relative to the zip root).
- */
-async function addEntryToZip(zip: JSZip, entry: FsEntry, prefix: string): Promise<number> {
-  if (IGNORE_DIRS.has(entry.name) && entry.isDirectory) return 0;
-  const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
-
+/** Recursively collect all FileEntry objects from a FileSystemEntry tree. */
+async function collectFromEntry(
+  entry: FileSystemEntry,
+  prefix: string
+): Promise<FileEntry[]> {
   if (entry.isFile) {
-    if (shouldSkipPath(relPath)) return 0;
-    const file = await readFile(entry as FsFileEntry);
-    zip.file(relPath, file);
-    return 1;
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (shouldSkip(path)) return [];
+    const file = await new Promise<File>((res, rej) =>
+      (entry as FileSystemFileEntry).file(res, rej)
+    );
+    return [{ file, path }];
   }
 
   if (entry.isDirectory) {
-    const children = await readAllEntries(entry as FsDirEntry);
-    let count = 0;
-    for (const child of children) {
-      count += await addEntryToZip(zip, child, relPath);
+    if (IGNORE_DIRS.has(entry.name)) return [];
+    const dirPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const reader = (entry as FileSystemDirectoryEntry).createReader();
+    const all: FileSystemEntry[] = [];
+    // readEntries returns at most ~100 entries per call — loop until empty.
+    for (;;) {
+      const batch = await new Promise<FileSystemEntry[]>((res, rej) =>
+        reader.readEntries(res, rej)
+      );
+      if (!batch.length) break;
+      all.push(...batch);
     }
-    return count;
+    const results: FileEntry[] = [];
+    for (const child of all) {
+      results.push(...(await collectFromEntry(child, dirPath)));
+    }
+    return results;
   }
-  return 0;
-}
 
-/* ───────── public API ───────── */
-
-function cleanName(raw: string): string {
-  return raw.replace(/\.zip$/i, "").replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^[._]+/, "") || "project";
-}
-
-async function finalizeZip(zip: JSZip, name: string, count: number, onProgress?: (pct: number) => void): Promise<BuiltZip> {
-  const blob = await zip.generateAsync(
-    { type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } },
-    (meta) => onProgress?.(Math.round(meta.percent))
-  );
-  return { zipBlob: blob, suggestedName: cleanName(name), fileCount: count, passthrough: false };
+  return [];
 }
 
 /**
- * Build a zip from a drag-and-drop DataTransfer. Handles a single dropped
- * `.zip` (passthrough), one folder, or a mix of files/folders.
- * Returns null when the drop contained nothing usable.
+ * Collect all droppable files from a DataTransfer object, preserving
+ * relative paths (folders arrive as trees, plain files arrive flat).
+ * Must be called synchronously in the drop event (before any await),
+ * then awaited for the async tree walk.
  */
-export async function buildZipFromDrop(
-  dataTransfer: DataTransfer,
-  onProgress?: (pct: number) => void
-): Promise<BuiltZip | null> {
+export async function collectFromDataTransfer(
+  dataTransfer: DataTransfer
+): Promise<FileEntry[]> {
   const items = Array.from(dataTransfer.items).filter((i) => i.kind === "file");
 
-  // Resolve entries up-front (webkitGetAsEntry must be called synchronously
-  // during the drop event, before any await).
-  const entries: FsEntry[] = [];
+  // Collect entries synchronously — webkitGetAsEntry must be called during
+  // the drop event before the DataTransfer is cleared.
+  const entries: FileSystemEntry[] = [];
   const looseFiles: File[] = [];
   for (const item of items) {
-    const getEntry = (item as unknown as { webkitGetAsEntry?: () => FsEntry | null }).webkitGetAsEntry;
-    const entry = getEntry ? getEntry.call(item) : null;
-    if (entry) entries.push(entry);
-    else {
+    const entry = (
+      item as unknown as { webkitGetAsEntry?: () => FileSystemEntry | null }
+    ).webkitGetAsEntry?.();
+    if (entry) {
+      entries.push(entry);
+    } else {
       const f = item.getAsFile();
       if (f) looseFiles.push(f);
     }
   }
 
-  // Single dropped .zip → passthrough (no re-zipping).
-  if (entries.length === 1 && entries[0].isFile) {
-    const file = await readFile(entries[0] as FsFileEntry);
-    if (isZipFile(file)) {
-      return { zipBlob: file, suggestedName: cleanName(file.name), fileCount: 0, passthrough: true };
-    }
+  const result: FileEntry[] = [];
+  for (const entry of entries) {
+    result.push(...(await collectFromEntry(entry, "")));
   }
-  if (entries.length === 0 && looseFiles.length === 1 && isZipFile(looseFiles[0])) {
-    const f = looseFiles[0];
-    return { zipBlob: f, suggestedName: cleanName(f.name), fileCount: 0, passthrough: true };
+  for (const f of looseFiles) {
+    if (!shouldSkip(f.name)) result.push({ file: f, path: f.name });
   }
-
-  const zip = new JSZip();
-  let count = 0;
-  let rootName = "project";
-
-  if (entries.length > 0) {
-    // If a single top-level folder was dropped, zip its *contents* at the root
-    // and name the project after it.
-    if (entries.length === 1 && entries[0].isDirectory) {
-      rootName = entries[0].name;
-      const children = await readAllEntries(entries[0] as FsDirEntry);
-      for (const child of children) count += await addEntryToZip(zip, child, "");
-    } else {
-      rootName = entries[0]?.name ?? "project";
-      for (const entry of entries) count += await addEntryToZip(zip, entry, "");
-    }
-  } else if (looseFiles.length > 0) {
-    rootName = looseFiles[0].name;
-    for (const f of looseFiles) {
-      if (shouldSkipPath(f.name)) continue;
-      zip.file(f.name, f);
-      count += 1;
-    }
-  }
-
-  if (count === 0) return null;
-  return finalizeZip(zip, rootName, count, onProgress);
+  return result;
 }
 
 /**
- * Build a zip from a `<input type="file" webkitdirectory>` FileList. Each
- * File carries a `webkitRelativePath` like "myapp/src/index.ts".
+ * Collect files from a `<input webkitdirectory>` or plain multi-file
+ * FileList, preserving the webkitRelativePath (includes the top folder name).
  */
-export async function buildZipFromFolderInput(
-  files: FileList | File[],
-  onProgress?: (pct: number) => void
-): Promise<BuiltZip | null> {
-  const list = Array.from(files);
-  if (list.length === 0) return null;
-
-  // Derive the top folder name from the common first path segment.
-  const firstRel = (list[0] as File & { webkitRelativePath?: string }).webkitRelativePath ?? list[0].name;
-  const rootName = firstRel.split("/")[0] || "project";
-
-  const zip = new JSZip();
-  let count = 0;
-  for (const f of list) {
-    const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
-    // Strip the leading top-folder segment so contents sit at the zip root.
-    const stripped = rel.includes("/") ? rel.slice(rel.indexOf("/") + 1) : rel;
-    if (!stripped || shouldSkipPath(stripped)) continue;
-    zip.file(stripped, f);
-    count += 1;
-  }
-
-  if (count === 0) return null;
-  return finalizeZip(zip, rootName, count, onProgress);
+export function collectFromFileList(fileList: FileList | File[]): FileEntry[] {
+  return Array.from(fileList)
+    .map((f) => {
+      const rel =
+        (f as File & { webkitRelativePath?: string }).webkitRelativePath ||
+        f.name;
+      return { file: f, path: rel };
+    })
+    .filter(({ path }) => !shouldSkip(path));
 }

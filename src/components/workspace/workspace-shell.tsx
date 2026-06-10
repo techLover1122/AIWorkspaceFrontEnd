@@ -1075,11 +1075,9 @@ export function WorkspaceShell({
       <ProjectUpload
         ref={projectUploadRef}
         workingDirectory={workingDirectory}
-        onChangeProject={onChangeProject}
         onStatusChange={setUploadStatus}
         onModalOpen={handleUploadModalOpen}
         onModalClose={handleUploadModalClose}
-        onOpenPreview={(url) => handleOpenTab(url, uploadStatus?.projectName || "Preview")}
       />
       <section className="workspace-frame">
         <section
@@ -1118,13 +1116,7 @@ export function WorkspaceShell({
                 visualEditActive={veActive && veTabId === activeTab.id}
                 onToggleVisualEdit={handleToggleVisualEdit}
                 uploadStatus={uploadStatus ?? undefined}
-                onUploadWidgetClick={() => {
-                  if (uploadStatus?.previewUrl) {
-                    handleOpenTab(uploadStatus.previewUrl, uploadStatus.projectName || "Preview");
-                  } else {
-                    projectUploadRef.current?.reopen();
-                  }
-                }}
+                onUploadWidgetClick={() => projectUploadRef.current?.reopen()}
                 onUploadWidgetDismiss={() => projectUploadRef.current?.dismiss()}
               />
             )}

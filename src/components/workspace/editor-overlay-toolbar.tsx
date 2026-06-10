@@ -136,7 +136,7 @@ export function EditorOverlayToolbar({
           uploading, a play icon when the dev server is ready, or an error
           dot on failure. Clicking re-opens the modal or opens the preview
           tab; the ✕ dismisses a finished/errored run. */}
-      {uploadStatus && uploadStatus.phase !== "idle" && (
+      {uploadStatus && (uploadStatus.phase === "uploading" || uploadStatus.phase === "done" || uploadStatus.phase === "error") && (
         <UploadRunWidget
           status={uploadStatus}
           onClick={onUploadWidgetClick}
@@ -284,28 +284,24 @@ function UploadRunWidget({
   onClick?: () => void;
   onDismiss?: () => void;
 }) {
-  const { phase, progress, projectName, previewUrl, error } = status;
+  const { phase, progress, fileCount, error } = status;
 
-  // Determinate progress ring (used while zipping: we have a real %).
-  // Circle r=5 → circumference ≈ 31.4.
+  // Determinate ring — circle r=5, circumference ≈ 31.4.
   const CIRC = 31.4;
-  const offset = phase === "zipping" ? CIRC * (1 - progress / 100) : 0;
+  const offset = CIRC * (1 - Math.min(progress, 100) / 100);
 
-  const isReady = phase === "done" && !!previewUrl;
+  const isDone = phase === "done";
   const isError = phase === "error";
-  const isBusy = phase === "zipping" || phase === "uploading" || phase === "running";
+  const isBusy = phase === "uploading";
 
   let label = "";
-  if (phase === "zipping") label = `Packaging ${projectName}… ${progress}%`;
-  else if (phase === "uploading") label = `Uploading ${projectName}…`;
-  else if (phase === "running") label = `Running ${projectName}…`;
-  else if (isReady) label = `${projectName} ready — click to open preview`;
-  else if (isError) label = `Upload failed: ${error ?? "unknown error"} — click to reopen`;
-  else if (phase === "done") label = `${projectName} done`;
+  if (isBusy) label = `Uploading ${fileCount} file${fileCount !== 1 ? "s" : ""}… ${progress}%`;
+  else if (isDone) label = `Upload done — ${fileCount} file${fileCount !== 1 ? "s" : ""} saved`;
+  else if (isError) label = `Upload failed: ${error ?? "unknown"} — click to reopen`;
 
   const widgetClass = [
     "overlay-upload-widget",
-    isReady ? "ready" : "",
+    isDone ? "ready" : "",
     isError ? "error" : "",
     isBusy ? "busy" : "",
   ].filter(Boolean).join(" ");
@@ -319,23 +315,25 @@ function UploadRunWidget({
         title={label}
         aria-label={label}
       >
-        {isReady ? (
-          <IconPlay />
+        {isDone ? (
+          // Green tick
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden>
+            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M5 8l2.5 2.5L11 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         ) : isError ? (
           <IconAlertDot />
         ) : (
-          // Ring: determinate while zipping, spinning while uploading/running.
+          // Determinate ring while uploading.
           <svg
             viewBox="0 0 16 16"
             width="16"
             height="16"
             fill="none"
             aria-hidden
-            className={isBusy && phase !== "zipping" ? "overlay-upload-spin" : undefined}
+            className="overlay-upload-spin"
           >
-            {/* Track */}
             <circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="2" opacity="0.25" />
-            {/* Fill */}
             <circle
               cx="8"
               cy="8"
@@ -344,20 +342,19 @@ function UploadRunWidget({
               strokeWidth="2"
               strokeLinecap="round"
               strokeDasharray={`${CIRC} ${CIRC}`}
-              strokeDashoffset={phase === "zipping" ? offset : 0}
+              strokeDashoffset={offset}
               style={{ transformOrigin: "8px 8px", transform: "rotate(-90deg)" }}
             />
           </svg>
         )}
       </button>
-      {/* Dismiss button — shown on hover via CSS for done/error states. */}
       {!isBusy && (
         <button
           type="button"
           className="overlay-upload-dismiss"
           onClick={(e) => { e.stopPropagation(); onDismiss?.(); }}
           title="Dismiss"
-          aria-label="Dismiss upload status"
+          aria-label="Dismiss"
         >
           <svg viewBox="0 0 10 10" width="8" height="8" fill="none" aria-hidden>
             <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -549,14 +546,6 @@ function IconComments() {
       <circle cx="6" cy="7.5" r="0.9" fill="currentColor" />
       <circle cx="8" cy="7.5" r="0.9" fill="currentColor" />
       <circle cx="10" cy="7.5" r="0.9" fill="currentColor" />
-    </svg>
-  );
-}
-
-function IconPlay() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M5 3.5l8 4.5-8 4.5V3.5z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
     </svg>
   );
 }

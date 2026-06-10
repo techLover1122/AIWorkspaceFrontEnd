@@ -141,18 +141,11 @@ export function installPackUrl(): string {
 /* ────── Local project upload + auto-run ──────
    Upload posts zip bytes; the server extracts under ~/.ai-ide/projects/,
    then /run detects + starts the project and streams output over SSE. */
-export function uploadProjectUrl(name: string, workingDirectory?: string): string {
-  const params = new URLSearchParams({ name });
-  if (workingDirectory) params.set("workingDirectory", workingDirectory);
-  return `${BACKEND_URL}/api/projects/upload?${params.toString()}`;
-}
-
-export function runProjectUrl(): string {
-  return `${BACKEND_URL}/api/projects/run`;
-}
-
-export function runProjectStreamUrl(runId: string): string {
-  return `${BACKEND_URL}/api/projects/run/${encodeURIComponent(runId)}/stream`;
+export function uploadFilesUrl(workingDirectory?: string): string {
+  if (workingDirectory) {
+    return `${BACKEND_URL}/api/files/upload?workingDirectory=${encodeURIComponent(workingDirectory)}`;
+  }
+  return `${BACKEND_URL}/api/files/upload`;
 }
 
 export function permissionDecisionUrl(id: string): string {

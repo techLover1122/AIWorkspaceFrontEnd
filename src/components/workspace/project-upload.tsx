@@ -9,315 +9,214 @@ import {
   useState,
 } from "react";
 import {
-  buildZipFromDrop,
-  buildZipFromFolderInput,
-  type BuiltZip,
+  collectFromDataTransfer,
+  collectFromFileList,
+  type FileEntry,
 } from "../../utils/projectUpload";
-import {
-  uploadProjectUrl,
-  runProjectUrl,
-  runProjectStreamUrl,
-} from "../../constant/api";
+import { uploadFilesUrl } from "../../constant/api";
 
 /**
- * Local project upload + auto-run UI.
+ * Upload panel — drops or picker → files land in workingDirectory with their
+ * original folder structure intact. No zipping, no running, no project
+ * detection. Just bytes → disk.
  *
- * Two entry points share one pipeline (build zip → upload → run → stream):
- *   • toolbar button → opens the chooser (folder / .zip)
- *   • global drag-drop → `handleDrop(dataTransfer)` via the imperative ref
- *
- * On a successful upload we switch the workspace working directory to the
- * extracted project, then kick off the run; the backend auto-opens a preview
- * tab when the dev server prints a localhost URL.
+ * Two entry points:
+ *   • toolbar button  → openChooser()
+ *   • global drag-drop → handleDrop(dataTransfer) via the imperative ref
  */
 
 export type ProjectUploadHandle = {
-  /** Open the chooser modal (folder / zip buttons). */
   openChooser: () => void;
-  /** Start the pipeline from a drag-and-drop DataTransfer. */
   handleDrop: (dataTransfer: DataTransfer) => void;
-  /** Re-open the modal without resetting state (use while a run is in progress). */
   reopen: () => void;
-  /** Clear a finished/errored run from the toolbar widget. */
   dismiss: () => void;
 };
 
 export type UploadStatus = {
-  phase: Phase;
+  phase: "idle" | "uploading" | "done" | "error";
+  /** 0–100 upload progress (byte-level via XHR). */
   progress: number;
-  projectName: string;
-  previewUrl: string | null;
+  fileCount: number;
   error: string | null;
 };
 
 type ProjectUploadProps = {
-  /** Current IDE working directory; uploads extract into a subfolder here. */
   workingDirectory?: string;
-  onChangeProject?: (path: string) => void;
-  /** Fires whenever the upload/run phase changes — drives the toolbar widget. */
-  onStatusChange?: (status: UploadStatus) => void;
-  /** Called when the modal becomes visible — used to hide WebContentsView tabs
-   *  in Electron so the modal isn't obscured by the compositor. */
+  onStatusChange?: (s: UploadStatus) => void;
+  /** Hide active Electron WebContentsView so the modal isn't occluded. */
   onModalOpen?: () => void;
-  /** Called when the modal is hidden — restores tab visibility. */
   onModalClose?: () => void;
-  /** Called when the user clicks "Open Preview" after a successful run. */
-  onOpenPreview?: (url: string) => void;
 };
 
-type Phase = "idle" | "zipping" | "uploading" | "running" | "done" | "error";
-
-type LogLine = { id: number; text: string; kind: "log" | "info" | "error" };
+/** Auto-close the success state after this many ms if user doesn't close it. */
+const AUTO_CLOSE_MS = 60_000;
 
 export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>(
-  function ProjectUpload({ workingDirectory, onChangeProject, onStatusChange, onModalOpen, onModalClose, onOpenPreview }, ref) {
+  function ProjectUpload({ workingDirectory, onStatusChange, onModalOpen, onModalClose }, ref) {
     const [open, setOpen] = useState(false);
-    const [phase, setPhase] = useState<Phase>("idle");
+    const [phase, setPhase] = useState<UploadStatus["phase"]>("idle");
     const [progress, setProgress] = useState(0);
-    const [projectName, setProjectName] = useState<string>("");
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-    const [logs, setLogs] = useState<LogLine[]>([]);
+    const [fileCount, setFileCount] = useState(0);
+    const [doneCount, setDoneCount] = useState(0);
     const [error, setError] = useState<string | null>(null);
 
     const folderInputRef = useRef<HTMLInputElement>(null);
-    const zipInputRef = useRef<HTMLInputElement>(null);
-    const esRef = useRef<EventSource | null>(null);
-    const logIdRef = useRef(0);
-    const logBodyRef = useRef<HTMLDivElement>(null);
+    const filesInputRef = useRef<HTMLInputElement>(null);
+    const xhrRef = useRef<XMLHttpRequest | null>(null);
+    const autoCloseRef = useRef<number | null>(null);
 
-    const pushLog = useCallback((text: string, kind: LogLine["kind"] = "log") => {
-      setLogs((prev) => {
-        const next = [...prev, { id: logIdRef.current++, text, kind }];
-        // Cap the rendered log to keep the DOM light.
-        return next.length > 600 ? next.slice(next.length - 600) : next;
-      });
-    }, []);
+    // ── helpers ──────────────────────────────────────────────────────────────
 
-    // Auto-scroll the log to the bottom as lines arrive.
-    useEffect(() => {
-      const el = logBodyRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
-    }, [logs]);
-
-    // Mirror state up to the toolbar widget.
-    useEffect(() => {
-      onStatusChange?.({ phase, progress, projectName, previewUrl, error });
-    }, [phase, progress, projectName, previewUrl, error, onStatusChange]);
-
-    // Hide the active Electron WebContentsView tab when the modal opens so it
-    // doesn't composite over the modal (WebContentsView renders above HTML at
-    // the OS compositor level). Restore when closed.
-    useEffect(() => {
-      if (open) {
-        onModalOpen?.();
-      } else {
-        onModalClose?.();
+    const clearAutoClose = () => {
+      if (autoCloseRef.current != null) {
+        window.clearTimeout(autoCloseRef.current);
+        autoCloseRef.current = null;
       }
-    // onModalOpen/onModalClose are stable callbacks — only re-run when open changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open]);
-
-    const closeStream = useCallback(() => {
-      esRef.current?.close();
-      esRef.current = null;
-    }, []);
+    };
 
     const reset = useCallback(() => {
-      closeStream();
+      clearAutoClose();
+      xhrRef.current?.abort();
+      xhrRef.current = null;
       setPhase("idle");
       setProgress(0);
-      setProjectName("");
-      setPreviewUrl(null);
-      setLogs([]);
+      setFileCount(0);
+      setDoneCount(0);
       setError(null);
-    }, [closeStream]);
+    }, []);
 
     const closeModal = useCallback(() => {
       setOpen(false);
-      // Leave a finished run's logs intact until the next open; only a fresh
-      // start clears them (reset runs at the top of runPipeline).
-      if (phase === "running" || phase === "uploading" || phase === "zipping") return;
-      closeStream();
-    }, [phase, closeStream]);
+      if (phase !== "uploading") reset();
+    }, [phase, reset]);
 
-    const startRunStream = useCallback(
-      (runId: string) => {
-        const es = new EventSource(runProjectStreamUrl(runId));
-        esRef.current = es;
-        es.onmessage = (ev) => {
-          try {
-            const e = JSON.parse(ev.data) as {
-              phase: string;
-              data?: string;
-              url?: string;
-              port?: number;
-              code?: number | null;
-            };
-            switch (e.phase) {
-              case "detected":
-                pushLog(`Detected project type: ${e.data}`, "info");
-                break;
-              case "installing":
-                pushLog(`Installing dependencies → ${e.data}`, "info");
-                break;
-              case "starting":
-                pushLog(`Starting → ${e.data}`, "info");
-                break;
-              case "port":
-                pushLog(`Preview ready at ${e.url} — opening tab…`, "info");
-                if (e.url) setPreviewUrl(e.url);
-                break;
-              case "log":
-                if (e.data) pushLog(e.data, "log");
-                break;
-              case "error":
-                pushLog(e.data ?? "Error", "error");
-                setError(e.data ?? "Run error");
-                break;
-              case "exit":
-                pushLog(`Process exited (code ${e.code ?? "?"}).`, "info");
-                setPhase((p) => (p === "error" ? p : "done"));
-                closeStream();
-                break;
-            }
-          } catch {
-            /* ignore malformed frame */
-          }
-        };
-        es.onerror = () => {
-          // The stream closes itself on exit; an error here usually means the
-          // run already finished. Don't surface it as a hard failure.
-          closeStream();
-        };
-      },
-      [pushLog, closeStream]
-    );
+    // Mirror status to toolbar widget.
+    useEffect(() => {
+      onStatusChange?.({ phase, progress, fileCount, error });
+    }, [phase, progress, fileCount, error, onStatusChange]);
 
-    const runPipeline = useCallback(
-      async (built: BuiltZip | null) => {
-        if (!built) {
-          setOpen(true);
-          setPhase("error");
-          setError("Nothing to upload — the drop was empty or all files were ignored.");
-          return;
-        }
+    // Hide/restore Electron WebContentsView when modal opens/closes.
+    useEffect(() => {
+      if (open) onModalOpen?.();
+      else onModalClose?.();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
+
+    // ── upload pipeline ───────────────────────────────────────────────────────
+
+    const runUpload = useCallback(
+      (entries: FileEntry[]) => {
+        if (!entries.length) return;
 
         reset();
         setOpen(true);
-        setProjectName(built.suggestedName);
-
-        try {
-          // 1) Upload the zip bytes.
-          setPhase("uploading");
-          setProgress(0);
-          const res = await fetch(uploadProjectUrl(built.suggestedName, workingDirectory), {
-            method: "POST",
-            headers: { "Content-Type": "application/zip" },
-            body: built.zipBlob,
-          });
-          if (!res.ok) {
-            const body = (await res.json().catch(() => null)) as { error?: string } | null;
-            throw new Error(body?.error ?? `Upload failed (HTTP ${res.status})`);
-          }
-          const uploaded = (await res.json()) as { ok: boolean; projectPath: string; name: string };
-          if (!uploaded.ok || !uploaded.projectPath) throw new Error("Upload rejected by server");
-
-          setProjectName(uploaded.name);
-          pushLog(`Uploaded → ${uploaded.projectPath}`, "info");
-          // Note: we intentionally do NOT call onChangeProject here — uploading a
-          // project should not re-root the workspace. The new folder appears in
-          // the current working directory without navigating away.
-
-          // 3) Kick off the run and stream its output.
-          setPhase("running");
-          const runRes = await fetch(runProjectUrl(), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ projectPath: uploaded.projectPath }),
-          });
-          if (!runRes.ok) {
-            const body = (await runRes.json().catch(() => null)) as { error?: string } | null;
-            throw new Error(body?.error ?? `Run failed to start (HTTP ${runRes.status})`);
-          }
-          const runData = (await runRes.json()) as { ok: boolean; runId: string };
-          if (!runData.ok || !runData.runId) throw new Error("Run rejected by server");
-          startRunStream(runData.runId);
-        } catch (err) {
-          setPhase("error");
-          setError((err as Error).message);
-          pushLog((err as Error).message, "error");
-        }
-      },
-      [reset, onChangeProject, pushLog, startRunStream]
-    );
-
-    const startFromBuilder = useCallback(
-      async (build: () => Promise<BuiltZip | null>) => {
-        reset();
-        setOpen(true);
-        setPhase("zipping");
+        setPhase("uploading");
+        setFileCount(entries.length);
         setProgress(0);
-        try {
-          const built = await build();
-          await runPipeline(built);
-        } catch (err) {
+
+        const fd = new FormData();
+        // Send relative paths alongside the binary data so the backend can
+        // reconstruct the directory tree.
+        fd.append("paths", JSON.stringify(entries.map((e) => e.path)));
+        entries.forEach((e, i) => fd.append(`file_${i}`, e.file));
+
+        const xhr = new XMLHttpRequest();
+        xhrRef.current = xhr;
+
+        xhr.upload.onprogress = (ev) => {
+          if (ev.lengthComputable) {
+            setProgress(Math.round((ev.loaded / ev.total) * 100));
+          }
+        };
+
+        xhr.onload = () => {
+          xhrRef.current = null;
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const res = JSON.parse(xhr.responseText) as { ok: boolean; count?: number; error?: string };
+              if (res.ok) {
+                setDoneCount(res.count ?? entries.length);
+                setProgress(100);
+                setPhase("done");
+                // Auto-close after 1 minute if the user hasn't dismissed yet.
+                autoCloseRef.current = window.setTimeout(() => {
+                  reset();
+                  setOpen(false);
+                }, AUTO_CLOSE_MS);
+                return;
+              }
+              throw new Error(res.error ?? "Upload failed");
+            } catch (e) {
+              setPhase("error");
+              setError((e as Error).message);
+            }
+          } else {
+            setPhase("error");
+            setError(`Upload failed (HTTP ${xhr.status})`);
+          }
+        };
+
+        xhr.onerror = () => {
+          xhrRef.current = null;
           setPhase("error");
-          setError((err as Error).message);
-        }
+          setError("Network error");
+        };
+
+        xhr.onabort = () => {
+          xhrRef.current = null;
+        };
+
+        xhr.open("POST", uploadFilesUrl(workingDirectory));
+        xhr.send(fd);
       },
-      [reset, runPipeline]
+      [reset, workingDirectory]
     );
+
+    // ── pickers ───────────────────────────────────────────────────────────────
+
+    const onFolderPicked = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => {
+        const entries = collectFromFileList(e.target.files ?? []);
+        if (entries.length) runUpload(entries);
+        e.target.value = "";
+      },
+      [runUpload]
+    );
+
+    const onFilesPicked = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => {
+        const entries = collectFromFileList(e.target.files ?? []);
+        if (entries.length) runUpload(entries);
+        e.target.value = "";
+      },
+      [runUpload]
+    );
+
+    // ── imperative handle ─────────────────────────────────────────────────────
 
     useImperativeHandle(
       ref,
       () => ({
         openChooser: () => {
-          if (phase === "zipping" || phase === "uploading" || phase === "running") {
-            setOpen(true);
-            return;
-          }
+          if (phase === "uploading") { setOpen(true); return; }
           reset();
           setOpen(true);
         },
         handleDrop: (dataTransfer: DataTransfer) => {
-          void startFromBuilder(() =>
-            buildZipFromDrop(dataTransfer, (pct) => setProgress(pct))
-          );
+          // Collect entries synchronously, then kick off the async walk + upload.
+          void collectFromDataTransfer(dataTransfer).then((entries) => {
+            if (entries.length) runUpload(entries);
+          });
         },
         reopen: () => setOpen(true),
-        dismiss: () => reset(),
+        dismiss: () => { reset(); setOpen(false); },
       }),
-      [phase, reset, startFromBuilder]
+      [phase, reset, runUpload]
     );
 
-    const onFolderPicked = useCallback(
-      (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (files && files.length > 0) {
-          void startFromBuilder(() => buildZipFromFolderInput(files, (pct) => setProgress(pct)));
-        }
-        e.target.value = "";
-      },
-      [startFromBuilder]
-    );
+    // ── render ────────────────────────────────────────────────────────────────
 
-    const onZipPicked = useCallback(
-      (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-          void startFromBuilder(async () => ({
-            zipBlob: file,
-            suggestedName: file.name.replace(/\.zip$/i, "") || "project",
-            fileCount: 0,
-            passthrough: true,
-          }));
-        }
-        e.target.value = "";
-      },
-      [startFromBuilder]
-    );
-
-    const busy = phase === "zipping" || phase === "uploading" || phase === "running";
+    const busy = phase === "uploading";
 
     return (
       <>
@@ -325,7 +224,7 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
         <input
           ref={folderInputRef}
           type="file"
-          // @ts-expect-error — non-standard but widely supported folder picker attrs
+          // @ts-expect-error — webkitdirectory is non-standard but widely supported
           webkitdirectory=""
           directory=""
           multiple
@@ -333,11 +232,11 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
           onChange={onFolderPicked}
         />
         <input
-          ref={zipInputRef}
+          ref={filesInputRef}
           type="file"
-          accept=".zip,application/zip"
+          multiple
           hidden
-          onChange={onZipPicked}
+          onChange={onFilesPicked}
         />
 
         {open && (
@@ -345,27 +244,29 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
             <div
               className="project-upload-modal"
               role="dialog"
-              aria-label="Upload project"
+              aria-label="Upload files"
               onClick={(e) => e.stopPropagation()}
             >
+              {/* Header */}
               <div className="project-upload-head">
                 <span className="project-upload-title">
                   {phase === "idle"
-                    ? "Upload a project"
-                    : projectName
-                    ? `Project: ${projectName}`
-                    : "Upload a project"}
+                    ? "Upload"
+                    : phase === "uploading"
+                    ? `Uploading ${fileCount} file${fileCount !== 1 ? "s" : ""}…`
+                    : phase === "done"
+                    ? `Done — ${doneCount} file${doneCount !== 1 ? "s" : ""} uploaded`
+                    : "Upload failed"}
                 </span>
                 <div className="project-upload-head-actions">
-                  {/* Minimize — hides the modal but keeps the run going; the
-                      toolbar widget stays live and shows progress. */}
+                  {/* Minimize while uploading */}
                   {busy && (
                     <button
                       type="button"
                       className="project-upload-close"
                       onClick={() => setOpen(false)}
-                      aria-label="Minimize to toolbar"
-                      title="Minimize to toolbar — run continues in the background"
+                      aria-label="Minimize"
+                      title="Minimize — upload continues in the background"
                     >
                       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
                         <path d="M3 8h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -386,11 +287,13 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
                 </div>
               </div>
 
+              {/* Idle — chooser */}
               {phase === "idle" && (
                 <div className="project-upload-chooser">
                   <p className="project-upload-hint">
-                    Drag &amp; drop a folder or a <code>.zip</code> anywhere, or choose below.
-                    Heavy folders (node_modules, .git…) are skipped automatically.
+                    Drag &amp; drop anywhere, or choose below. Folders are
+                    uploaded with their structure intact.
+                    Heavy dirs (node_modules, .git…) are skipped.
                   </p>
                   <div className="project-upload-actions">
                     <button
@@ -403,82 +306,76 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
                     <button
                       type="button"
                       className="project-upload-btn"
-                      onClick={() => zipInputRef.current?.click()}
+                      onClick={() => filesInputRef.current?.click()}
                     >
-                      Choose .zip
+                      Choose files
                     </button>
                   </div>
                 </div>
               )}
 
-              {phase !== "idle" && (
+              {/* Uploading — progress bar */}
+              {phase === "uploading" && (
                 <div className="project-upload-progress-wrap">
-                  <div className="project-upload-steps">
-                    <Step label="Package" active={phase === "zipping"} done={phaseRank(phase) > 1} />
-                    <Step label="Upload" active={phase === "uploading"} done={phaseRank(phase) > 2} />
-                    <Step
-                      label="Run"
-                      active={phase === "running"}
-                      done={phase === "done"}
-                      failed={phase === "error"}
+                  <div className="project-upload-bar">
+                    <div
+                      className="project-upload-bar-fill"
+                      style={{ width: `${progress}%` }}
                     />
                   </div>
-
-                  {(phase === "zipping" || phase === "uploading") && (
-                    <div className="project-upload-bar">
-                      <div
-                        className="project-upload-bar-fill"
-                        style={{ width: `${phase === "uploading" ? 100 : progress}%` }}
-                      />
-                    </div>
-                  )}
-
-                  {error && <div className="project-upload-error">{error}</div>}
-
-                  {logs.length > 0 && (
-                    <div className="project-upload-log" ref={logBodyRef}>
-                      {logs.map((l) => (
-                        <div key={l.id} className={`project-upload-log-line ${l.kind}`}>
-                          {l.text}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
                   <div className="project-upload-foot">
-                    {busy ? (
-                      <span className="project-upload-busy">
-                        {phase === "zipping"
-                          ? `Packaging… ${progress}%`
-                          : phase === "uploading"
-                          ? "Uploading…"
-                          : "Running… (minimize to keep working)"}
-                      </span>
-                    ) : phase === "done" && previewUrl ? (
-                      <div className="project-upload-foot-row">
-                        <button
-                          type="button"
-                          className="project-upload-btn primary"
-                          onClick={() => { onOpenPreview?.(previewUrl); setOpen(false); }}
-                        >
-                          ▶ Open Preview
-                        </button>
-                        <button type="button" className="project-upload-btn" onClick={() => reset()}>
-                          Upload another
-                        </button>
-                      </div>
-                    ) : phase === "done" ? (
-                      <div className="project-upload-foot-row">
-                        <span className="project-upload-busy">Done — no preview URL detected</span>
-                        <button type="button" className="project-upload-btn" onClick={() => reset()}>
-                          Upload another
-                        </button>
-                      </div>
-                    ) : (
-                      <button type="button" className="project-upload-btn" onClick={() => reset()}>
-                        Upload another
-                      </button>
-                    )}
+                    <span className="project-upload-busy">{progress}% — minimize to keep working</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Done — green tick */}
+              {phase === "done" && (
+                <div className="project-upload-progress-wrap">
+                  <div className="project-upload-done-icon" aria-hidden>
+                    <svg viewBox="0 0 40 40" width="40" height="40" fill="none">
+                      <circle cx="20" cy="20" r="18" stroke="#22c55e" strokeWidth="2.5" />
+                      <path
+                        d="M12 20l6 6 10-12"
+                        stroke="#22c55e"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  <p className="project-upload-done-msg">
+                    Files saved to{" "}
+                    <code>{workingDirectory ?? "workspace"}</code>.
+                    Closing automatically in 1 min.
+                  </p>
+                  <div className="project-upload-foot">
+                    <button
+                      type="button"
+                      className="project-upload-btn primary"
+                      onClick={() => { clearAutoClose(); reset(); }}
+                    >
+                      Upload more
+                    </button>
+                    <button
+                      type="button"
+                      className="project-upload-btn"
+                      onClick={() => { clearAutoClose(); reset(); setOpen(false); }}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Error */}
+              {phase === "error" && (
+                <div className="project-upload-progress-wrap">
+                  <div className="project-upload-error">{error}</div>
+                  <div className="project-upload-foot">
+                    <button type="button" className="project-upload-btn" onClick={reset}>
+                      Try again
+                    </button>
                   </div>
                 </div>
               )}
@@ -490,48 +387,9 @@ export const ProjectUpload = forwardRef<ProjectUploadHandle, ProjectUploadProps>
   }
 );
 
-function phaseRank(phase: Phase): number {
-  switch (phase) {
-    case "idle":
-      return 0;
-    case "zipping":
-      return 1;
-    case "uploading":
-      return 2;
-    case "running":
-      return 3;
-    case "done":
-    case "error":
-      return 4;
-  }
-}
-
-function Step({
-  label,
-  active,
-  done,
-  failed,
-}: {
-  label: string;
-  active?: boolean;
-  done?: boolean;
-  failed?: boolean;
-}) {
-  const cls = ["project-upload-step", active ? "active" : "", done ? "done" : "", failed ? "failed" : ""]
-    .filter(Boolean)
-    .join(" ");
-  return (
-    <div className={cls}>
-      <span className="project-upload-step-dot" />
-      <span className="project-upload-step-label">{label}</span>
-    </div>
-  );
-}
-
 /**
  * Full-workspace overlay shown while files are dragged over the window.
- * Purely presentational — the drop handling lives in workspace-shell so it can
- * gate on `dataTransfer.types` and avoid clashing with tab-reorder drags.
+ * Purely presentational — drop handling lives in workspace-shell.
  */
 export function ProjectDropOverlay() {
   return (
@@ -546,7 +404,7 @@ export function ProjectDropOverlay() {
             strokeLinejoin="round"
           />
         </svg>
-        <span>Drop a folder or .zip to upload &amp; run</span>
+        <span>Drop a folder or files to upload</span>
       </div>
     </div>
   );
