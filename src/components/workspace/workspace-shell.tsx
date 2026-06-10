@@ -10,6 +10,11 @@ import { ChatSessions } from "./chat-sessions";
 import { EditorTabs } from "./editor-tabs";
 import { EditorOverlayToolbar, type EditorOverlayTool } from "./editor-overlay-toolbar";
 import {
+  ProjectUpload,
+  ProjectDropOverlay,
+  type ProjectUploadHandle,
+} from "./project-upload";
+import {
   PreviewPane,
   type Drawing,
   type DrawingPoint,
@@ -107,6 +112,13 @@ export function WorkspaceShell({
   // collapse, send, or tab close.
   const [commentsByTab, setCommentsByTab] = useState<Record<string, Comment[]>>({});
   const workspaceRef = useRef<HTMLElement>(null);
+
+  // Local project upload (folder / .zip → extract + auto-run). The handle lets
+  // the toolbar button and the global drop handler both drive one pipeline.
+  const projectUploadRef = useRef<ProjectUploadHandle>(null);
+  const [dropActive, setDropActive] = useState(false);
+  // Counts dragenter/dragleave so nested children don't flicker the overlay.
+  const dragDepthRef = useRef(0);
 
   // Annotation snapshot — per-tab data URL of the screen-captured iframe
   // pixels. While this is set for a tab, the PreviewPane swaps the live
@@ -811,6 +823,44 @@ export function WorkspaceShell({
     setChatWidth(DEFAULT_CHAT_WIDTH);
   }, []);
 
+  /* ------------------------------------------------------------------
+     Global project drag-and-drop. Only reacts to OS file drags (the
+     "Files" type) — internal tab-reorder drags carry no files, so the
+     existing handleTabDrop path is left untouched.
+     ------------------------------------------------------------------ */
+
+  const dragHasFiles = (e: DragEvent<HTMLElement>): boolean =>
+    Array.from(e.dataTransfer?.types ?? []).includes("Files");
+
+  const handleWorkspaceDragEnter = useCallback((e: DragEvent<HTMLElement>) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setDropActive(true);
+  }, []);
+
+  const handleWorkspaceDragOver = useCallback((e: DragEvent<HTMLElement>) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const handleWorkspaceDragLeave = useCallback((e: DragEvent<HTMLElement>) => {
+    if (!dragHasFiles(e)) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDropActive(false);
+  }, []);
+
+  const handleWorkspaceDrop = useCallback((e: DragEvent<HTMLElement>) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setDropActive(false);
+    // Pass the native DataTransfer straight through — the component resolves
+    // webkitGetAsEntry() synchronously before any await.
+    projectUploadRef.current?.handleDrop(e.dataTransfer);
+  }, []);
+
   // Memoize the context value so we don't pass a fresh object literal
   // on every WorkspaceShell render — that would cascade through
   // useContext consumers (chat-panel.tsx in particular) and break
@@ -823,7 +873,15 @@ export function WorkspaceShell({
 
   return (
     <WorkspaceTabContext.Provider value={tabContextValue}>
-    <main className="app-shell">
+    <main
+      className="app-shell"
+      onDragEnter={handleWorkspaceDragEnter}
+      onDragOver={handleWorkspaceDragOver}
+      onDragLeave={handleWorkspaceDragLeave}
+      onDrop={handleWorkspaceDrop}
+    >
+      {dropActive && <ProjectDropOverlay />}
+      <ProjectUpload ref={projectUploadRef} onChangeProject={onChangeProject} />
       <section className="workspace-frame">
         <section
           ref={workspaceRef}
@@ -849,6 +907,7 @@ export function WorkspaceShell({
                 activeTool={activeTool}
                 onChangeTool={handleChangeTool}
                 onReload={handleActiveTabReload}
+                onUploadProject={() => projectUploadRef.current?.openChooser()}
                 showAnnotationTools={!!activeTab.url}
                 onCollapse={handleToolbarCollapse}
                 onSend={handleToolbarSend}

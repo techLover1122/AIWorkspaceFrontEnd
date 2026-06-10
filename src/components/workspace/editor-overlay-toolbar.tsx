@@ -24,6 +24,10 @@ type EditorOverlayToolbarProps = {
   /** Reload the active tab's iframe. Always shown — works for any URL
    *  (code-server, live preview, external sites). */
   onReload: () => void;
+  /** Open the project-upload chooser (folder / .zip). Always shown — works
+   *  regardless of which tab is active. Optional so the toolbar still renders
+   *  in contexts that don't wire it. */
+  onUploadProject?: () => void;
   /** When false, hide marker / comments / send buttons. The refresh
    *  button still renders. Set to true on tabs where annotation makes
    *  sense (port-bearing previews; in practice we now also show on
@@ -70,6 +74,7 @@ export function EditorOverlayToolbar({
   activeTool,
   onChangeTool,
   onReload,
+  onUploadProject,
   showAnnotationTools = false,
   onCollapse,
   onSend,
@@ -120,6 +125,20 @@ export function EditorOverlayToolbar({
       >
         <IconReload />
       </button>
+
+      {/* Upload a local project (folder / .zip) → extract + auto-run. Always
+          available; independent of the active tab. */}
+      {onUploadProject && (
+        <button
+          type="button"
+          className="overlay-toolbar-btn"
+          onClick={onUploadProject}
+          title="Upload a local project (folder or .zip) and run it"
+          aria-label="Upload project"
+        >
+          <IconUpload />
+        </button>
+      )}
 
       {showAnnotationTools && (
         <>
@@ -247,6 +266,20 @@ function IconReload() {
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
       <path
         d="M3 8a5 5 0 0 1 9-3M13 3v3h-3M13 8a5 5 0 0 1-9 3M3 13v-3h3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconUpload() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden>
+      <path
+        d="M8 10V2.5M5 5.5L8 2.5l3 3M3 10.5v2A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5v-2"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
