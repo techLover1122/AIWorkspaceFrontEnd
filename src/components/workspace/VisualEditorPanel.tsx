@@ -17,7 +17,7 @@
 // The panel also owns multi-pin management (list / select / remove) and the
 // "Apply" handoff that ships the payload to the chat agent.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { EditChange, EditMode, ElementPin, Pin, ShapePin } from "../../utils/electronVisualEdit";
 
 /* ───────────────────────── value helpers ───────────────────────── */
@@ -328,9 +328,11 @@ function BoxModel({ f, set }: { f: Fields; set: (k: keyof Fields, v: string) => 
 /* ─────────────────────── per-pin inspector ─────────────────────── */
 
 function PinInspector({
-  pin, onEdit, onSetNote, onEditOnPage, onRemoveElement, textEditing,
+  pin, rev, onEdit, onSetNote, onEditOnPage, onRemoveElement, textEditing,
 }: {
   pin: ElementPin;
+  /** Bumped by undo/redo — re-seeds the fields in place (no remount). */
+  rev: number;
   onEdit: (change: EditChange) => void;
   onSetNote: (note: string) => void;
   onEditOnPage: () => void;
@@ -365,6 +367,18 @@ function PinInspector({
   const [note, setNoteState] = useState(pin.annotation.note ?? "");
   const computedRef = useRef(pin.computed);
   computedRef.current = pin.computed;
+
+  // Re-seed the fields when an external change (undo/redo, which bumps `rev`)
+  // alters the annotation. Done in place rather than via a remount key so the
+  // inspector keeps its scroll position. Normal in-panel edits don't bump rev,
+  // so they never clobber what the user is typing.
+  const seededRev = useRef(rev);
+  useEffect(() => {
+    if (rev === seededRev.current) return;
+    seededRev.current = rev;
+    setF(seed);
+    setNoteState(pin.annotation.note ?? "");
+  }, [rev, seed, pin]);
 
   const set = (k: keyof Fields, v: string | number) => {
     setF((prev) => {
@@ -718,8 +732,9 @@ export function VisualEditorPanel({
       {selected ? (
         selected.kind === "element" ? (
           <PinInspector
-            key={`${selected.n}:${rev}`}
+            key={selected.n}
             pin={selected}
+            rev={rev}
             onEdit={(change) => onEdit(selected.n, change)}
             onSetNote={(note) => onSetNote(selected.n, note)}
             onEditOnPage={() => onEditOnPage(selected.n)}
