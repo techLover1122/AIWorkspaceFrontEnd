@@ -36,6 +36,7 @@ type AIIDEGlobal = {
   tab?: ElectronTabs;
   onOpenTab?: (cb: (url: string, label: string) => void) => () => void;
   tunnel?: import("./electronTunnel").ElectronTunnel;
+  visualEdit?: import("./electronVisualEdit").ElectronVisualEdit;
 };
 
 declare global {

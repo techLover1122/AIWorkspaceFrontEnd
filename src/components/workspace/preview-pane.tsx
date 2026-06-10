@@ -112,6 +112,16 @@ export function PreviewPane({
   const isExternalContent = !!url && url !== PORTS_VIEW_URL;
   const useView = !!electron && isExternalContent;
 
+  // Avoid an SSR/client hydration mismatch: getElectronTabs() is null during
+  // server render (so the server emits the <iframe> fallback) but an object in
+  // Electron (where we render the WebContentsView path with no iframe). Render
+  // nothing for the content host until after mount so the first client render
+  // matches the server HTML; the effect below then flips to the real path.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Mark the tab as loading the moment its URL changes (the iframe will
   // refetch) and clear it again on the next `load` event. Empty URL = the
   // "new tab" page, which doesn't fetch anything, so we never enter the
@@ -260,10 +270,12 @@ export function PreviewPane({
   return (
     <div className="preview-frame" style={hiddenStyle}>
       <div className="preview-content" ref={contentRef}>
-        {useView ? (
-          // The WebContentsView is composited above the renderer by Electron.
-          // Nothing to render here — the preview-content div is just a layout
-          // anchor whose rect drives setBounds (read by the workspace shell).
+        {!mounted || useView ? (
+          // Pre-mount: render nothing (matches the server HTML once Electron is
+          // detected client-side — see the mounted gate above).
+          // Electron: the WebContentsView is composited above the renderer;
+          // the preview-content div is just a layout anchor whose rect drives
+          // setBounds (read by the workspace shell).
           null
         ) : (
           <iframe
