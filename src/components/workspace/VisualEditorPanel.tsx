@@ -363,7 +363,6 @@ function PinInspector({
 
   const [f, setF] = useState<Fields>(seed);
   const [note, setNoteState] = useState(pin.annotation.note ?? "");
-  const [text, setText] = useState(pin.annotation.text?.to ?? pin.text ?? "");
   const computedRef = useRef(pin.computed);
   computedRef.current = pin.computed;
 
@@ -505,35 +504,25 @@ function PinInspector({
 
       <Section title="Content">
         {pin.textEditable ? (
-          <>
-            <div className="ve-content-head">
-              <button
-                type="button"
-                className={`ve-text-edit-btn${textEditing ? " active" : ""}`}
-                onClick={onEditOnPage}
-                disabled={textEditing}
-                title="Click into the element on the page and type directly"
-              >
-                <IconPencil /> {textEditing ? "Editing on page…" : "Edit on page"}
-              </button>
+          textEditing ? (
+            <p className="ve-annotations-empty">
+              Editing on the page — type directly on the element. Press Enter or Esc (or click away) to finish.
+            </p>
+          ) : (
+            <div
+              className="ve-text-display"
+              role="button"
+              tabIndex={0}
+              onClick={onEditOnPage}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEditOnPage(); } }}
+              title="Click to edit this text on the page"
+            >
+              <IconPencil />
+              <span className="ve-text-display-val">
+                {(pin.annotation.text?.to ?? pin.text ?? "").trim() || "(empty — click to add text)"}
+              </span>
             </div>
-            {textEditing ? (
-              <p className="ve-annotations-empty">
-                Type directly on the element — press Enter or Esc (or click away) to finish.
-              </p>
-            ) : (
-              <textarea
-                className="ve-note"
-                placeholder="Element text…"
-                value={text}
-                onChange={(e) => {
-                  setText(e.target.value);
-                  onEdit({ kind: "text", value: e.target.value, from: pin.text ?? "" });
-                }}
-                rows={2}
-              />
-            )}
-          </>
+          )
         ) : (
           <p className="ve-annotations-empty">
             This element has child elements — edit its text on the specific leaf you pinned.

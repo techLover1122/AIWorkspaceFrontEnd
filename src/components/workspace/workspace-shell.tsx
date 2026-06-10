@@ -171,6 +171,9 @@ export function WorkspaceShell({
   const veActive = !!veSessionId;
   const veSessionRef = useRef<string | null>(null);
   veSessionRef.current = veSessionId;
+  // Pins we've already seen, so on-page text editing auto-starts only on a
+  // genuinely new pick (not on every annotation update for an existing pin).
+  const veSeenPinsRef = useRef<Set<number>>(new Set());
   // Whether the visual-edit tool is available (Electron preload present).
   // Resolved AFTER mount so the first client render matches the SSR HTML
   // (getElectronVisualEdit() is null on the server, an object in Electron) —
@@ -531,6 +534,15 @@ export function WorkspaceShell({
         if (!here(sessionId)) return;
         setVePins((prev) => [...prev.filter((p) => p.n !== pin.n), pin].sort((a, b) => a.n - b.n));
         setVeSelected(pin.n);
+        // First sighting of a directly text-editable element → drop straight
+        // into on-page editing (the default; no button to click).
+        if (!veSeenPinsRef.current.has(pin.n)) {
+          veSeenPinsRef.current.add(pin.n);
+          if (pin.kind === "element" && pin.textEditable) {
+            const sid = veSessionRef.current;
+            if (sid) { setVeTextEditing(pin.n); ve.editText(sid, pin.n, true).catch(() => {}); }
+          }
+        }
       }),
       ve.onPinSelected(({ sessionId, n }) => { if (here(sessionId)) setVeSelected(n); }),
       ve.onPinDetached(({ sessionId, n, detached }) => {
@@ -546,13 +558,14 @@ export function WorkspaceShell({
         if (!here(sessionId)) return;
         setVePins([]);
         setVeSelected(null);
+        veSeenPinsRef.current.clear();
       }),
       ve.onTextEditEnd(({ sessionId }) => {
         if (!here(sessionId)) return;
-        // On-page editing finished — clear the editing flag and re-seed the
-        // inspector so the Content field reflects the typed text.
+        // On-page editing finished. The Content display reads the typed text
+        // straight from the pin, so no remount (rev bump) is needed — and
+        // bumping rev here would re-trigger the auto-edit on the remount.
         setVeTextEditing(null);
-        setVeRev((r) => r + 1);
         setVeCanUndo(true);
         setVeCanRedo(false);
       }),
@@ -572,6 +585,7 @@ export function WorkspaceShell({
     setVeCanUndo(false);
     setVeCanRedo(false);
     setVeTextEditing(null);
+    veSeenPinsRef.current.clear();
   }, []);
 
   const handleToggleVisualEdit = useCallback(() => {
@@ -678,8 +692,11 @@ export function WorkspaceShell({
   useEffect(() => {
     if (!veActive) return;
     const onKey = (e: KeyboardEvent) => {
+      // Only defer to native undo inside multiline text fields. Sliders, selects
+      // and single-line inputs should still trigger a visual-edit undo (the
+      // common case: tweak a slider, then Ctrl+Z).
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (t && (t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (!(e.metaKey || e.ctrlKey)) return;
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) { e.preventDefault(); handleVeUndo(); }

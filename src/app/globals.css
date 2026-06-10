@@ -5988,27 +5988,28 @@ button {
   background: var(--vsc-hover);
   color: var(--vsc-text);
 }
-.ve-content-head { display: flex; justify-content: flex-end; margin-bottom: 6px; }
-.ve-text-edit-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 9px;
+/* Content text — click anywhere to edit it directly on the page. */
+.ve-text-display {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 7px 9px;
   border-radius: 6px;
   border: 1px solid var(--vsc-border-strong);
-  background: var(--vsc-hover);
+  background: var(--vsc-input-bg, var(--vsc-hover));
   color: var(--vsc-text);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: text;
+  transition: border-color 120ms ease, background 120ms ease;
 }
-.ve-text-edit-btn:hover:not(:disabled) { background: var(--bot-accent-soft); color: var(--bot-accent); }
-.ve-text-edit-btn.active, .ve-text-edit-btn:disabled {
+.ve-text-display:hover, .ve-text-display:focus-visible {
+  border-color: var(--bot-accent);
   background: var(--bot-accent-soft);
-  color: var(--bot-accent);
-  cursor: default;
+  outline: none;
 }
+.ve-text-display .ve-svg { flex: 0 0 auto; margin-top: 2px; color: var(--vsc-text-muted); }
+.ve-text-display-val { word-break: break-word; }
 
 /* pin bar */
 .ve-pinbar {
