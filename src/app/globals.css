@@ -491,13 +491,38 @@ button {
 /* Close affordance appears on hover (or keyboard focus) only — the active
    tab no longer keeps it pinned, matching modern browser tab behavior. */
 .editor-tab:hover .tab-close,
-.editor-tab:focus-within .tab-close {
+.editor-tab:focus-within .tab-close,
+.chat-session-tab:hover .tab-close,
+.chat-session-tab:focus-within .tab-close {
   opacity: 1;
 }
 
 .tab-close:hover {
   background: color-mix(in srgb, var(--vsc-error) 22%, transparent);
   color: var(--vsc-error);
+}
+
+/* Chat session tabs: the close button is hidden by default and only
+   revealed when the tab is hovered (or keyboard-focused). It renders in the
+   error red so the close affordance reads clearly — including on the active
+   tab's purple gradient. */
+.chat-session-tab .tab-close {
+  opacity: 0;
+  color: var(--vsc-error);
+}
+
+.chat-session-tab:hover .tab-close,
+.chat-session-tab:focus-within .tab-close {
+  opacity: 1;
+}
+
+.chat-session-tab.active .tab-close {
+  color: var(--vsc-error);
+}
+
+.chat-session-tab .tab-close:hover {
+  color: var(--vsc-error);
+  background: color-mix(in srgb, var(--vsc-error) 22%, transparent);
 }
 
 .tab-add {
