@@ -118,6 +118,7 @@ export type ConversationSummary = {
   lastTime: string;
   messageCount: number;
   lastMessagePreview: string;
+  title?: string;
 };
 
 /** Mirrors the SDK's PermissionUpdate shape (kept loose to avoid pulling

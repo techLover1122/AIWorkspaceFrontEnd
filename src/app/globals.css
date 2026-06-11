@@ -3530,6 +3530,8 @@ button {
   align-items: flex-start;
   gap: 2px;
   padding: 8px 12px;
+  flex: 1;
+  min-width: 0;
 }
 
 .history-conversation-preview {
@@ -3540,12 +3542,171 @@ button {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  width: 100%;
 }
 
 .history-conversation-meta {
   color: var(--vsc-text-muted);
   font-size: 11px;
   font-family: var(--font-mono);
+}
+
+/* ── Conversation row wrapper (enables hover actions) ── */
+.history-conversation-item-wrapper {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.history-conversation-item-wrapper:hover .history-conversation-item {
+  background: var(--vsc-hover);
+}
+
+/* Override the shared hover so it doesn't fire independently */
+.history-conversation-item-wrapper .history-conversation-item:hover {
+  background: transparent;
+}
+
+.history-conversation-item-wrapper:hover .history-conversation-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ── Floating action buttons (pencil + trash) ── */
+.history-conversation-actions {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--vsc-hover) 28%);
+}
+
+.history-action-btn {
+  background: transparent;
+  border: 0;
+  color: var(--vsc-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.history-action-btn:hover {
+  color: var(--vsc-text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.history-action-btn.delete:hover {
+  color: #f44336;
+}
+
+/* ── Inline rename row ── */
+.history-conversation-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.history-conversation-edit-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--vsc-input-bg, #1e1e1e);
+  border: 1px solid var(--vsc-accent, #007acc);
+  color: var(--vsc-text);
+  font-size: 12px;
+  padding: 4px 7px;
+  border-radius: 3px;
+  outline: none;
+  font-family: inherit;
+}
+
+.history-edit-save,
+.history-edit-cancel {
+  background: transparent;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.history-edit-save {
+  border: 1px solid var(--vsc-accent, #007acc);
+  color: var(--vsc-accent, #007acc);
+}
+
+.history-edit-save:hover {
+  background: rgba(0, 122, 204, 0.15);
+}
+
+.history-edit-cancel {
+  border: 1px solid var(--vsc-text-muted);
+  color: var(--vsc-text-muted);
+}
+
+.history-edit-cancel:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Delete confirmation row ── */
+.history-conversation-confirm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(244, 67, 54, 0.06);
+}
+
+.history-confirm-text {
+  flex: 1;
+  font-size: 11px;
+  color: var(--vsc-text-muted);
+}
+
+.history-confirm-yes {
+  background: #b71c1c;
+  border: 0;
+  color: #fff;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.history-confirm-yes:hover {
+  background: #c62828;
+}
+
+.history-confirm-no {
+  background: transparent;
+  border: 1px solid var(--vsc-text-muted);
+  color: var(--vsc-text-muted);
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.history-confirm-no:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .history-back {
