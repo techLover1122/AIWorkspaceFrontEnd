@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import { INSTANCE_IP, PLATFORM_DOMAIN, USER_ID } from "../../constant/api";
 import type { AuthMethod } from "../../hooks/useConnectionStatus";
 
 type Props = {
@@ -38,7 +37,6 @@ export function AccountUsageModal({
   authMethod,
   apiKeyMasked,
   version,
-  workingDirectory,
   inputTokens,
   outputTokens,
   contextLimit,
@@ -124,26 +122,6 @@ export function AccountUsageModal({
               <div className="acct-row">
                 <dt>Claude CLI</dt>
                 <dd className="acct-mono">v{version}</dd>
-              </div>
-            )}
-            {workingDirectory && (
-              <div className="acct-row">
-                <dt>Workspace</dt>
-                <dd className="acct-mono acct-truncate" title={workingDirectory}>
-                  {workingDirectory}
-                </dd>
-              </div>
-            )}
-            <div className="acct-row">
-              <dt>Server</dt>
-              <dd className="acct-mono">{PLATFORM_DOMAIN || INSTANCE_IP}</dd>
-            </div>
-            {USER_ID && (
-              <div className="acct-row">
-                <dt>User</dt>
-                <dd className="acct-mono acct-truncate" title={USER_ID}>
-                  {USER_ID}
-                </dd>
               </div>
             )}
           </dl>

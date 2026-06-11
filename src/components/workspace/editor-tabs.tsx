@@ -4,6 +4,7 @@ import {
   CSSProperties,
   DragEvent,
   KeyboardEvent,
+  ReactNode,
   useCallback,
   useEffect,
   useRef,
@@ -36,6 +37,8 @@ type EditorTabsProps = {
   onGroupRemove: (tabId: string) => void;
   onGroupToggle: (groupId: string) => void;
   onGroupRename: (groupId: string, label: string) => void;
+  /** Optional slot rendered at the very left of the tab strip (e.g. a profile avatar button). */
+  profileSlot?: ReactNode;
 };
 
 export function EditorTabs({
@@ -52,6 +55,7 @@ export function EditorTabs({
   onGroupRemove,
   onGroupToggle,
   onGroupRename,
+  profileSlot,
 }: EditorTabsProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
@@ -243,6 +247,7 @@ export function EditorTabs({
 
   return (
     <div className="editor-tabs">
+      {profileSlot}
       {elements}
       <button
         type="button"

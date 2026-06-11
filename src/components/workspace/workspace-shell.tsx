@@ -8,6 +8,7 @@ import { WorkspaceTabContext } from "../../contexts/WorkspaceTabContext";
 import { getElectronTabs } from "../../utils/electronTabs";
 import { ChatSessions } from "./chat-sessions";
 import { EditorTabs } from "./editor-tabs";
+import { ProfileButton } from "./ProfileButton";
 import { EditorOverlayToolbar, type EditorOverlayTool } from "./editor-overlay-toolbar";
 import {
   ProjectUpload,
@@ -1239,6 +1240,7 @@ export function WorkspaceShell({
               onGroupRemove={handleGroupRemove}
               onGroupToggle={handleGroupToggle}
               onGroupRename={handleGroupRename}
+              profileSlot={<ProfileButton />}
               />
             <div className="editor-body" ref={editorBodyRef}>
               {/* Render every tab simultaneously and hide non-active ones via

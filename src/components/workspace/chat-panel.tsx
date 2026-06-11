@@ -266,6 +266,17 @@ export function ChatPanel({
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [accountModalFocus, setAccountModalFocus] = useState<"account" | "usage">("account");
+
+  // Allow the ProfileButton (in the tab bar) to open the account modal via a
+  // custom DOM event — avoids prop drilling through workspace-shell.
+  useEffect(() => {
+    const handler = () => {
+      setAccountModalFocus("account");
+      setShowAccountModal(true);
+    };
+    window.addEventListener("ai-ide:open-account", handler);
+    return () => window.removeEventListener("ai-ide:open-account", handler);
+  }, []);
   const [askQuestion, setAskQuestion] = useState<AskUserQuestionRequest | null>(null);
   // Prompt queue: messages the user submitted while a turn was already in
   // flight. They auto-drain one at a time as each turn finishes (see the
