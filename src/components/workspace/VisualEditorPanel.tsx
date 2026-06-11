@@ -549,8 +549,7 @@ function PinInspector({
           className="ve-note"
           placeholder="Intent a control can't express…"
           value={note}
-          onChange={(e) => setNoteState(e.target.value)}
-          onBlur={() => onSetNote(note)}
+          onChange={(e) => { setNoteState(e.target.value); onSetNote(e.target.value); }}
           rows={2}
         />
       </Section>
@@ -677,7 +676,13 @@ export function VisualEditorPanel({
   const selected = pins.find((p) => p.n === selectedN) ?? null;
   const totalEdits = pins.reduce(
     (acc, p) =>
-      acc + (p.kind === "element" ? Object.keys(p.annotation.css).length + (p.annotation.text ? 1 : 0) : 1),
+      acc +
+      (p.kind === "element"
+        ? Object.keys(p.annotation.css).length +
+          (p.annotation.text ? 1 : 0) +
+          (p.annotation.note ? 1 : 0) +
+          (p.annotation.remove ? 1 : 0)
+        : 1),
     0
   );
 
