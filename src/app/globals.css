@@ -1807,8 +1807,8 @@ button {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 260px;
-  height: 260px;
+  width: min(260px, 80%);
+  height: min(260px, 80%);
   transform: translate(-50%, -50%);
   background: rgba(139, 92, 246, 0.2);
   border-radius: 50%;
@@ -1831,15 +1831,15 @@ button {
   pointer-events: none;
 }
 .bot-orbit-1 {
-  width: 200px;
-  height: 200px;
+  width: min(200px, 72%);
+  height: min(200px, 72%);
   border: 1px solid rgba(139, 92, 246, 0.28);
   transform: translate(-50%, -50%);
   animation: botSpin 18s linear infinite;
 }
 .bot-orbit-2 {
-  width: 260px;
-  height: 260px;
+  width: min(260px, 88%);
+  height: min(260px, 88%);
   border: 1px solid rgba(34, 211, 238, 0.18);
   transform: translate(-50%, -50%);
   animation: botSpinReverse 22s linear infinite;

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatInputHandle } from "../chat/ChatInput";
 import { ChatPanel } from "./chat-panel";
+import { ProfileButton } from "./ProfileButton";
 
 /* ------------------------------------------------------------------
  * ChatSessions
@@ -232,6 +233,7 @@ export function ChatSessions({
   return (
     <div className="chat-sessions">
       <div className="chat-session-tabs" role="tablist" aria-label="Chat sessions">
+        <ProfileButton />
         {snap.sessions.map((s) => {
           const isActive = s.id === snap.activeId;
           const isRunning = !!loadingMap[s.id];
