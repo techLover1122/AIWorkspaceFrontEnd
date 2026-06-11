@@ -180,4 +180,10 @@ export function whatsappForwardingUrl(): string {
   return `${BACKEND_URL}/api/whatsapp/forwarding`;
 }
 
+/* Profile avatar — GET serves the stored image (404 → UI shows bot),
+   POST uploads multipart { file }, DELETE reverts to the bot default. */
+export function avatarUrl(): string {
+  return `${BACKEND_URL}/api/profile/avatar`;
+}
+
 export { BACKEND_URL };
