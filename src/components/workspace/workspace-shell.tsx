@@ -1224,6 +1224,7 @@ export function WorkspaceShell({
                 uploadStatus={uploadStatus ?? undefined}
                 onUploadWidgetClick={() => projectUploadRef.current?.reopen()}
                 onUploadWidgetDismiss={() => projectUploadRef.current?.dismiss()}
+                profileSlot={<ProfileButton />}
               />
             )}
             <EditorTabs
@@ -1240,7 +1241,6 @@ export function WorkspaceShell({
               onGroupRemove={handleGroupRemove}
               onGroupToggle={handleGroupToggle}
               onGroupRename={handleGroupRename}
-              profileSlot={<ProfileButton />}
               />
             <div className="editor-body" ref={editorBodyRef}>
               {/* Render every tab simultaneously and hide non-active ones via

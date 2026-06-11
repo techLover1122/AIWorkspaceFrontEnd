@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useTunnelStatus, type TunnelStatusValue } from "../../utils/electronTunnel";
 import type { UploadStatus } from "./project-upload";
 
@@ -61,6 +62,8 @@ type EditorOverlayToolbarProps = {
   onUploadWidgetClick?: () => void;
   /** Called when the user dismisses (✕) a finished/errored widget. */
   onUploadWidgetDismiss?: () => void;
+  /** Optional slot rendered at the far right of the toolbar (e.g. a profile avatar button). */
+  profileSlot?: ReactNode;
   className?: string;
 };
 
@@ -101,6 +104,7 @@ export function EditorOverlayToolbar({
   uploadStatus,
   onUploadWidgetClick,
   onUploadWidgetDismiss,
+  profileSlot,
   className,
 }: EditorOverlayToolbarProps) {
   // Collapsed mode — just the handle. The `.collapsed` modifier + the
@@ -120,6 +124,7 @@ export function EditorOverlayToolbar({
         >
           <IconChevronLeft />
         </button>
+        {profileSlot}
       </div>
     );
   }
@@ -267,6 +272,12 @@ export function EditorOverlayToolbar({
       >
         <IconChevronRight />
       </button>
+      {profileSlot && (
+        <>
+          <div className="overlay-toolbar-divider" aria-hidden />
+          {profileSlot}
+        </>
+      )}
     </div>
   );
 }
