@@ -176,8 +176,27 @@ export function ProfileButton() {
         >
           {/* ── User info header ── */}
           <div className="profile-dropdown-header">
-            <div className={`profile-dropdown-avatar${avatarSrc ? " has-img" : " is-bot"}`}>
-              <AvatarFace src={avatarSrc} />
+            <div className="profile-dropdown-avatar-wrap">
+              <div className={`profile-dropdown-avatar${avatarSrc ? " has-img" : " is-bot"}`}>
+                <AvatarFace src={avatarSrc} />
+              </div>
+              <button
+                type="button"
+                className="profile-avatar-camera"
+                onClick={pickFile}
+                disabled={uploading}
+                title={avatarSrc ? "Change photo" : "Upload photo"}
+                aria-label={avatarSrc ? "Change photo" : "Upload photo"}
+              >
+                <CameraIcon />
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                hidden
+                onChange={onFileChange}
+              />
             </div>
             <div className="profile-dropdown-meta">
               <span className="profile-dropdown-id" title={USER_ID || undefined}>
@@ -211,34 +230,18 @@ export function ProfileButton() {
                 <span>Server</span>
                 <span className="profile-account-val">{SERVER_LABEL}</span>
               </div>
-              <div className="profile-avatar-actions">
-                <button
-                  type="button"
-                  className="profile-avatar-action"
-                  onClick={pickFile}
-                  disabled={uploading}
-                >
-                  <CameraIcon />
-                  {uploading ? "Uploading…" : avatarSrc ? "Change photo" : "Upload photo"}
-                </button>
-                {avatarSrc && (
+              {avatarSrc && (
+                <div className="profile-avatar-actions">
                   <button
                     type="button"
                     className="profile-avatar-action danger"
                     onClick={removeAvatar}
                     disabled={uploading}
                   >
-                    Remove
+                    {uploading ? "Working…" : "Remove photo"}
                   </button>
-                )}
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  hidden
-                  onChange={onFileChange}
-                />
-              </div>
+                </div>
+              )}
             </div>
           )}
 
