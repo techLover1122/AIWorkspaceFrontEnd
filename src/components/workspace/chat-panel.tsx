@@ -13,7 +13,14 @@ import type {
 } from "../../types/types";
 import { useClaudeStreaming } from "../../hooks/useClaudeStreaming";
 import { useChatState, createUserMessage } from "../../hooks/useChatState";
-import { INSTANCE_IP, conversationUrl, eventsUrl, permissionDecisionUrl, portScanUrl, projectsUrl } from "../../constant/api";
+import {
+  INSTANCE_IP,
+  conversationUrl,
+  eventsUrl,
+  permissionDecisionUrl,
+  portScanUrl,
+  projectsUrl,
+} from "../../constant/api";
 import { convertHistoryMessages } from "../../utils/messageConverter";
 import { ChatMessages } from "../chat/ChatMessages";
 import {
@@ -27,7 +34,10 @@ import { PlanPermissionInputPanel } from "../chat/PlanPermissionInputPanel";
 import { IntentGuardPanel } from "../chat/IntentGuardPanel";
 import { AnomalyAlertBanner } from "../chat/AnomalyAlert";
 import { HistoryView } from "../chat/HistoryView";
-import { EnvironmentPackModal, type InstalledPack } from "../chat/EnvironmentPackModal";
+import {
+  EnvironmentPackModal,
+  type InstalledPack,
+} from "../chat/EnvironmentPackModal";
 import { WhatsAppLinkModal } from "../chat/WhatsAppLinkModal";
 import { AskUserQuestionModal } from "../chat/AskUserQuestionModal";
 import { ConfirmDialog, type ConfirmRequest } from "../chat/ConfirmDialog";
@@ -54,7 +64,7 @@ type ScannedPort = {
  *  `data:<type>;base64,` prefix so the result is ready to drop straight
  *  into an Anthropic SDK image source. */
 function readFileAsBase64(
-  file: File
+  file: File,
 ): Promise<{ base64: string; mediaType: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -174,12 +184,7 @@ function writePermissionMode(mode: PermissionMode): void {
 // Bash is intentionally NOT here: it would also fire for read-only
 // commands (ls, cat, grep) and reloads would feel random. The edit
 // tools below are a clean signal.
-const FILE_EDIT_TOOLS = new Set([
-  "Edit",
-  "Write",
-  "MultiEdit",
-  "NotebookEdit",
-]);
+const FILE_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
 type ChatPanelProps = {
   workingDirectory?: string;
@@ -235,7 +240,9 @@ export function ChatPanel({
   // last-session lookup is namespaced by sessionKey too. The REAL
   // workingDirectory is still used for backend project lookups below.
   const persistCwd =
-    sessionKey && workingDirectory ? `${workingDirectory}::${sessionKey}` : workingDirectory;
+    sessionKey && workingDirectory
+      ? `${workingDirectory}::${sessionKey}`
+      : workingDirectory;
 
   // Report in-flight state up to the session tab strip (for the running
   // dot). Routed through a ref so a changing parent callback identity can't
@@ -250,22 +257,27 @@ export function ChatPanel({
   // Default to bypassPermissions so the user isn't prompted "Allow / Allow"
   // for every tool call. Whatever mode they switch to via the toggle is
   // persisted, so refreshes keep their preference.
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>(
-    loadPermissionMode
-  );
+  const [permissionMode, setPermissionMode] =
+    useState<PermissionMode>(loadPermissionMode);
   useEffect(() => {
     writePermissionMode(permissionMode);
   }, [permissionMode]);
-  const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
-  const [planRequest, setPlanRequest] = useState<PermissionRequest | null>(null);
-  const [intentGuardRequest, setIntentGuardRequest] = useState<IntentGuardRequest | null>(null);
+  const [permissionRequest, setPermissionRequest] =
+    useState<PermissionRequest | null>(null);
+  const [planRequest, setPlanRequest] = useState<PermissionRequest | null>(
+    null,
+  );
+  const [intentGuardRequest, setIntentGuardRequest] =
+    useState<IntentGuardRequest | null>(null);
   const [anomalyAlert, setAnomalyAlert] = useState<AnomalyAlert | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [showPackModal, setShowPackModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [showAccountModal, setShowAccountModal] = useState(false);
-  const [accountModalFocus, setAccountModalFocus] = useState<"account" | "usage">("account");
+  const [accountModalFocus, setAccountModalFocus] = useState<
+    "account" | "usage"
+  >("account");
 
   // Allow the ProfileButton (in the tab bar) to open the account modal via a
   // custom DOM event — avoids prop drilling through workspace-shell.
@@ -277,7 +289,9 @@ export function ChatPanel({
     window.addEventListener("ai-ide:open-account", handler);
     return () => window.removeEventListener("ai-ide:open-account", handler);
   }, []);
-  const [askQuestion, setAskQuestion] = useState<AskUserQuestionRequest | null>(null);
+  const [askQuestion, setAskQuestion] = useState<AskUserQuestionRequest | null>(
+    null,
+  );
   // Prompt queue: messages the user submitted while a turn was already in
   // flight. They auto-drain one at a time as each turn finishes (see the
   // drain effect below). Each carries its own attachments so a queued
@@ -292,7 +306,10 @@ export function ChatPanel({
   // Live token usage from the backend. Drives the CompactRing in the
   // header. Resets on /clear, /logout, and after a manual compact since
   // each starts a fresh conversation with no carryover context.
-  const [tokenUsage, setTokenUsage] = useState<{ inputTokens: number; outputTokens: number }>({
+  const [tokenUsage, setTokenUsage] = useState<{
+    inputTokens: number;
+    outputTokens: number;
+  }>({
     inputTokens: 0,
     outputTokens: 0,
   });
@@ -317,7 +334,7 @@ export function ChatPanel({
           node;
       }
     },
-    [externalChatInputRef]
+    [externalChatInputRef],
   );
 
   const connection = useConnectionStatus();
@@ -347,7 +364,8 @@ export function ChatPanel({
 
     const lastSessionId = loadLastSessionMap()[persistCwd];
     if (!lastSessionId) return;
-    if (stateRef.current.sessionId || stateRef.current.messages.length > 0) return;
+    if (stateRef.current.sessionId || stateRef.current.messages.length > 0)
+      return;
 
     let cancelled = false;
     (async () => {
@@ -357,7 +375,7 @@ export function ChatPanel({
         if (cancelled) return;
         const target = normalizeCwd(workingDirectory);
         const project = (projData.projects ?? []).find(
-          (p) => normalizeCwd(p.path) === target
+          (p) => normalizeCwd(p.path) === target,
         );
         if (!project) {
           // Backend no longer knows this project — stale entry, drop it.
@@ -365,7 +383,7 @@ export function ChatPanel({
           return;
         }
         const convRes = await fetch(
-          conversationUrl(project.encodedName, lastSessionId)
+          conversationUrl(project.encodedName, lastSessionId),
         );
         if (!convRes.ok) {
           // 404 means the on-disk transcript is gone (deleted/rotated);
@@ -378,7 +396,10 @@ export function ChatPanel({
         if (cancelled) return;
         // Re-check — user may have typed or picked another chat while
         // we were fetching.
-        if (stateRef.current.sessionId || stateRef.current.messages.length > 0) {
+        if (
+          stateRef.current.sessionId ||
+          stateRef.current.messages.length > 0
+        ) {
           return;
         }
         setSessionId(lastSessionId);
@@ -391,7 +412,14 @@ export function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [isConnected, workingDirectory, persistCwd, setSessionId, setMessages, stateRef]);
+  }, [
+    isConnected,
+    workingDirectory,
+    persistCwd,
+    setSessionId,
+    setMessages,
+    stateRef,
+  ]);
 
   const handleReuseMessage = useCallback((text: string) => {
     chatInputRef.current?.setDraft(text);
@@ -411,13 +439,17 @@ export function ChatPanel({
 
   // Stable ref so the SSE handler can attach a WhatsApp-originated task
   // without the EventSource being recreated on every render.
-  const attachWhatsAppTaskRef = useRef<(taskId: string, userMessage?: string) => void>(() => {});
+  const attachWhatsAppTaskRef = useRef<
+    (taskId: string, userMessage?: string) => void
+  >(() => {});
   // WhatsApp turns that arrived while the panel was mid-stream. We must NOT
   // drop them (the old bug: only the first of a back-to-back WhatsApp burst
   // showed in the panel). Instead we queue them here and drain one-by-one as
   // each turn finishes. De-duped by taskId so a re-published event can't
   // double-add.
-  const pendingWhatsAppRef = useRef<Array<{ taskId: string; userMessage?: string }>>([]);
+  const pendingWhatsAppRef = useRef<
+    Array<{ taskId: string; userMessage?: string }>
+  >([]);
   const seenWhatsAppTaskRef = useRef<Set<string>>(new Set());
 
   // Manual compact: ask the AI to produce a structured summary of the
@@ -428,7 +460,9 @@ export function ChatPanel({
   // Themed replacement for window.confirm() — see ConfirmDialog. `confirm`
   // returns a promise that resolves when the user picks an option, so call
   // sites can `await` it just like the native dialog's boolean.
-  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(
+    null,
+  );
   const confirmResolverRef = useRef<((ok: boolean) => void) | null>(null);
   const confirm = useCallback((req: ConfirmRequest): Promise<boolean> => {
     return new Promise<boolean>((resolve) => {
@@ -484,7 +518,9 @@ export function ChatPanel({
   // the (later-declared) handleSend without React's hooks-order rules
   // blowing up on a forward reference.
   const pendingCompactRef = useRef(false);
-  const handleSendRef = useRef<((message: string, attachments: Attachment[]) => void) | null>(null);
+  const handleSendRef = useRef<
+    ((message: string, attachments: Attachment[]) => void) | null
+  >(null);
 
   const handleStop = useCallback(() => {
     // Stop means halt: cancel the in-flight turn AND drop anything still
@@ -519,11 +555,11 @@ export function ChatPanel({
         const projData = (await projRes.json()) as { projects?: ProjectInfo[] };
         const target = normalizeCwd(workingDirectory);
         const project = (projData.projects ?? []).find(
-          (p) => normalizeCwd(p.path) === target
+          (p) => normalizeCwd(p.path) === target,
         );
         if (!project) return false;
         const convRes = await fetch(
-          conversationUrl(project.encodedName, sessionId)
+          conversationUrl(project.encodedName, sessionId),
         );
         if (!convRes.ok) return false;
         const convData: { messages?: unknown[] } = await convRes.json();
@@ -535,7 +571,7 @@ export function ChatPanel({
         return false;
       }
     },
-    [workingDirectory, setMessages]
+    [workingDirectory, setMessages],
   );
 
   const streamCallbacks = useCallback(
@@ -686,7 +722,7 @@ export function ChatPanel({
                     timestamp: Date.now(),
                   },
                 ]
-              : []
+              : [],
           );
           setSessionId("");
           forgetLastSession(persistCwd);
@@ -707,7 +743,11 @@ export function ChatPanel({
         let didEdit = false;
         for (let i = start; i < msgs.length; i++) {
           const m = msgs[i];
-          if (m.type === "tool" && m.toolName && FILE_EDIT_TOOLS.has(m.toolName)) {
+          if (
+            m.type === "tool" &&
+            m.toolName &&
+            FILE_EDIT_TOOLS.has(m.toolName)
+          ) {
             didEdit = true;
             break;
           }
@@ -725,7 +765,23 @@ export function ChatPanel({
         setCurrentRequestId(null);
       },
     }),
-    [addMessage, appendToLastMessage, finalizeLastMessage, setSessionId, setLoading, setCurrentRequestId, setLastSeq, state.currentRequestId, abort, stateRef, tabCtx, workingDirectory, persistCwd, setMessages, restoreFromDisk]
+    [
+      addMessage,
+      appendToLastMessage,
+      finalizeLastMessage,
+      setSessionId,
+      setLoading,
+      setCurrentRequestId,
+      setLastSeq,
+      state.currentRequestId,
+      abort,
+      stateRef,
+      tabCtx,
+      workingDirectory,
+      persistCwd,
+      setMessages,
+      restoreFromDisk,
+    ],
   );
 
   /* ------------------------------------------------------------------
@@ -806,7 +862,16 @@ export function ChatPanel({
       };
       void attachToTask(taskId, 0, req, streamCallbacks());
     },
-    [workingDirectory, permissionMode, attachToTask, streamCallbacks, setLoading, setCurrentRequestId, stateRef, addMessage]
+    [
+      workingDirectory,
+      permissionMode,
+      attachToTask,
+      streamCallbacks,
+      setLoading,
+      setCurrentRequestId,
+      stateRef,
+      addMessage,
+    ],
   );
 
   // Keep attachWhatsAppTaskRef current so the SSE handler below always
@@ -857,7 +922,11 @@ export function ChatPanel({
         return;
       }
       const lines = ports.map((p) => {
-        const name = p.title || p.appLabel || (p.processName ?? "").replace(/\.exe$/i, "") || "Server";
+        const name =
+          p.title ||
+          p.appLabel ||
+          (p.processName ?? "").replace(/\.exe$/i, "") ||
+          "Server";
         return `- **${name}** → http://${INSTANCE_IP}:${p.port}`;
       });
       addMessage({
@@ -889,8 +958,8 @@ export function ChatPanel({
       // them.
       let composed = message;
       if (otherAttachments.length > 0) {
-        const lines = otherAttachments.map((a) =>
-          `- file: ${a.name}${a.meta ? ` (${a.meta})` : ""}`
+        const lines = otherAttachments.map(
+          (a) => `- file: ${a.name}${a.meta ? ` (${a.meta})` : ""}`,
         );
         composed = [message, message ? "" : null, "[attached]", ...lines]
           .filter((s) => s !== null)
@@ -912,7 +981,9 @@ export function ChatPanel({
       // prior tool call. (length-based, not id-based, so it works even
       // after a /clear or history restore.)
       turnStartIndexRef.current = stateRef.current.messages.length;
-      const isFirstUserMsg = !stateRef.current.messages.some((m) => m.role === "user");
+      const isFirstUserMsg = !stateRef.current.messages.some(
+        (m) => m.role === "user",
+      );
       addMessage(createUserMessage(composed, imagePreviewUrls));
       if (isFirstUserMsg && onFirstMessage && message.trim()) {
         onFirstMessage(message.trim());
@@ -935,7 +1006,7 @@ export function ChatPanel({
           imageAttachments.map(async (a) => {
             const { base64, mediaType } = await readFileAsBase64(a.file);
             return { name: a.name, base64, mediaType };
-          })
+          }),
         );
         send(
           {
@@ -946,7 +1017,7 @@ export function ChatPanel({
             permissionMode,
             attachments: encoded.length > 0 ? encoded : undefined,
           },
-          streamCallbacks()
+          streamCallbacks(),
         );
       })();
     },
@@ -962,7 +1033,7 @@ export function ChatPanel({
       streamCallbacks,
       stateRef,
       onFirstMessage,
-    ]
+    ],
   );
 
   // Public send entry point. If a turn is already in flight, the message is
@@ -986,7 +1057,7 @@ export function ChatPanel({
       }
       runSend(message, attachments);
     },
-    [runSend, stateRef]
+    [runSend, stateRef],
   );
 
   const cancelQueued = useCallback((id: string) => {
@@ -1029,9 +1100,7 @@ export function ChatPanel({
 
   const handleAskUserQuestionSubmit = useCallback(
     (answers: Record<string, string>) => {
-      const lines = Object.entries(answers).map(
-        ([q, a]) => `- ${q}\n  → ${a}`
-      );
+      const lines = Object.entries(answers).map(([q, a]) => `- ${q}\n  → ${a}`);
       const message =
         `Here are my answers to your question${lines.length === 1 ? "" : "s"}:\n\n` +
         lines.join("\n") +
@@ -1052,7 +1121,7 @@ export function ChatPanel({
       setAskQuestion(null);
       handleSend(message, []);
     },
-    [handleSend, addMessage]
+    [handleSend, addMessage],
   );
 
   const handleAskUserQuestionCancel = useCallback(() => {
@@ -1061,7 +1130,8 @@ export function ChatPanel({
     addMessage({
       id: `sys_${Date.now()}`,
       type: "system",
-      content: "Question modal cancelled. Send a follow-up message to continue.",
+      content:
+        "Question modal cancelled. Send a follow-up message to continue.",
       timestamp: Date.now(),
     });
     setAskQuestion(null);
@@ -1073,7 +1143,13 @@ export function ChatPanel({
   const recentlyNotifiedPacks = useRef<Map<string, number>>(new Map());
 
   const handlePackInstalled = useCallback(
-    (pack: { name: string; slug: string; description?: string; hasInstall: boolean; installedAt: string }) => {
+    (pack: {
+      name: string;
+      slug: string;
+      description?: string;
+      hasInstall: boolean;
+      installedAt: string;
+    }) => {
       const now = Date.now();
       const last = recentlyNotifiedPacks.current.get(pack.slug);
       if (last && now - last < 30_000) return;
@@ -1090,7 +1166,9 @@ export function ChatPanel({
       // verbatim, don't substitute". This message ties THAT directive to
       // THIS specific newly-installed pack so the model can't claim it
       // didn't know.
-      const desc = pack.description ? `\n\nPack description: ${pack.description}` : "";
+      const desc = pack.description
+        ? `\n\nPack description: ${pack.description}`
+        : "";
       const installSteps = pack.hasInstall
         ? `\n\nThis pack includes an INSTALL.md. Read ~/.claude/skills/${pack.slug}/INSTALL.md and run the install steps it describes using your shell tools. Confirm with me before each command that modifies the system. After install completes, run a brief verification and summarize what was installed.`
         : `\n\nThis pack has no INSTALL.md, so no install steps are needed right now.`;
@@ -1109,7 +1187,7 @@ export function ChatPanel({
         `\n\nStart by calling list_environment_packs (and Read ~/.claude/skills/${pack.slug}/SKILL.md if you need detail) to confirm what was installed, then continue the current task — or, if no task is in flight, just acknowledge.`;
       handleSend(message, []);
     },
-    [addMessage, handleSend]
+    [addMessage, handleSend],
   );
 
   // Listen for pack-install events from any path (CLI / API / modal).
@@ -1125,8 +1203,20 @@ export function ChatPanel({
     es.onmessage = (e) => {
       try {
         const evt = JSON.parse(e.data) as
-          | { type: "pack_installed"; name: string; slug: string; description: string; hasInstall: boolean; installedAt: string }
-          | { type: "task_started"; taskId: string; origin: string; userMessage?: string }
+          | {
+              type: "pack_installed";
+              name: string;
+              slug: string;
+              description: string;
+              hasInstall: boolean;
+              installedAt: string;
+            }
+          | {
+              type: "task_started";
+              taskId: string;
+              origin: string;
+              userMessage?: string;
+            }
           | { type: string };
         if (evt.type === "pack_installed") {
           const p = evt as Extract<typeof evt, { type: "pack_installed" }>;
@@ -1152,10 +1242,13 @@ export function ChatPanel({
 
   const toggleMode = useCallback(() => {
     setPermissionMode((prev) =>
-      prev === "default" ? "plan"
-      : prev === "plan" ? "acceptEdits"
-      : prev === "acceptEdits" ? "bypassPermissions"
-      : "default"
+      prev === "default"
+        ? "plan"
+        : prev === "plan"
+          ? "acceptEdits"
+          : prev === "acceptEdits"
+            ? "bypassPermissions"
+            : "default",
     );
   }, []);
 
@@ -1232,7 +1325,7 @@ export function ChatPanel({
         });
       }
     },
-    [permissionRequest, addMessage]
+    [permissionRequest, addMessage],
   );
 
   const handlePermissionDeny = useCallback(async () => {
@@ -1317,7 +1410,7 @@ export function ChatPanel({
         ]);
       }
     },
-    [setSessionId, setMessages]
+    [setSessionId, setMessages],
   );
 
   const handleSlashCommand = useCallback(
@@ -1379,7 +1472,7 @@ export function ChatPanel({
       connection,
       workingDirectory,
       persistCwd,
-    ]
+    ],
   );
 
   return (
@@ -1456,7 +1549,7 @@ export function ChatPanel({
           >
             <IconWhatsApp />
           </button>
-          <button
+          {/* <button
             type="button"
             className="chat-header-btn"
             onClick={() => {
@@ -1470,7 +1563,7 @@ export function ChatPanel({
             aria-label="New chat"
           >
             <IconPlus />
-          </button>
+          </button> */}
         </span>
       </div>
 
@@ -1480,138 +1573,141 @@ export function ChatPanel({
         <ConnectScreen connection={connection} />
       ) : (
         <>
-      {showHistory && (
-        <HistoryView
-          workingDirectory={workingDirectory}
-          onSelect={handleHistorySelect}
-          onClose={() => setShowHistory(false)}
-        />
-      )}
-
-      <EnvironmentPackModal
-        open={showPackModal}
-        onClose={() => setShowPackModal(false)}
-        onInstalled={handlePackInstalled}
-        onCreateRequest={(message) => handleSend(message, [])}
-      />
-
-      <AskUserQuestionModal
-        request={askQuestion}
-        onCancel={handleAskUserQuestionCancel}
-        onSubmit={handleAskUserQuestionSubmit}
-      />
-
-      <WhatsAppLinkModal
-        open={showWhatsAppModal}
-        onClose={() => setShowWhatsAppModal(false)}
-      />
-
-      {showProjectPicker && onChangeProject && (
-        <div className="project-overlay" onClick={() => setShowProjectPicker(false)}>
-          <div onClick={(e) => e.stopPropagation()}>
-            <ProjectSelector
-              currentPath={workingDirectory}
-              onSelect={(path) => {
-                onChangeProject(path);
-                setShowProjectPicker(false);
-              }}
-              onClose={() => setShowProjectPicker(false)}
+          {showHistory && (
+            <HistoryView
+              workingDirectory={workingDirectory}
+              onSelect={handleHistorySelect}
+              onClose={() => setShowHistory(false)}
             />
-          </div>
-        </div>
-      )}
+          )}
 
-      <ChatMessages
-        messages={state.messages}
-        onReuse={handleReuseMessage}
-        showToolDetails={showToolDetails}
-      />
+          <EnvironmentPackModal
+            open={showPackModal}
+            onClose={() => setShowPackModal(false)}
+            onInstalled={handlePackInstalled}
+            onCreateRequest={(message) => handleSend(message, [])}
+          />
 
-      {intentGuardRequest && (
-        <IntentGuardPanel
-          request={intentGuardRequest}
-          onResolved={() => setIntentGuardRequest(null)}
-        />
-      )}
+          <AskUserQuestionModal
+            request={askQuestion}
+            onCancel={handleAskUserQuestionCancel}
+            onSubmit={handleAskUserQuestionSubmit}
+          />
 
-      {permissionRequest && (
-        <PermissionInputPanel
-          request={permissionRequest}
-          onAllow={handlePermissionAllow}
-          onDeny={handlePermissionDeny}
-        />
-      )}
+          <WhatsAppLinkModal
+            open={showWhatsAppModal}
+            onClose={() => setShowWhatsAppModal(false)}
+          />
 
-      {planRequest && (
-        <PlanPermissionInputPanel
-          onAcceptWithAutoEdits={handlePlanAcceptAuto}
-          onAcceptManual={handlePlanAcceptManual}
-          onKeepPlanning={handlePlanKeep}
-        />
-      )}
-
-      {anomalyAlert && (
-        <AnomalyAlertBanner
-          alert={anomalyAlert}
-          onDismiss={() => setAnomalyAlert(null)}
-        />
-      )}
-
-      {state.isLoading && (
-        <div className="typing-bar">
-          <TypingIndicator messages={state.messages} />
-        </div>
-      )}
-
-      {queue.length > 0 && (
-        <div className="chat-queue" aria-label="Queued messages">
-          <span className="chat-queue-label">
-            Queued · auto-sends next ({queue.length})
-          </span>
-          {queue.map((item, i) => (
-            <div className="chat-queue-item" key={item.id}>
-              <span className="chat-queue-num">{i + 1}</span>
-              <span className="chat-queue-text" title={item.message}>
-                {item.message.trim() ||
-                  (item.attachments.length > 0
-                    ? `[${item.attachments.length} attachment${
-                        item.attachments.length === 1 ? "" : "s"
-                      }]`
-                    : "(empty)")}
-              </span>
-              <button
-                type="button"
-                className="chat-queue-cancel"
-                onClick={() => cancelQueued(item.id)}
-                title="Remove from queue"
-                aria-label="Remove queued message"
-              >
-                <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-                  <path
-                    d="M4 4l8 8M12 4l-8 8"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
+          {showProjectPicker && onChangeProject && (
+            <div
+              className="project-overlay"
+              onClick={() => setShowProjectPicker(false)}
+            >
+              <div onClick={(e) => e.stopPropagation()}>
+                <ProjectSelector
+                  currentPath={workingDirectory}
+                  onSelect={(path) => {
+                    onChangeProject(path);
+                    setShowProjectPicker(false);
+                  }}
+                  onClose={() => setShowProjectPicker(false)}
+                />
+              </div>
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      <ChatInput
-        ref={setChatInputRef}
-        onSend={handleSend}
-        onStop={handleStop}
-        onSlashCommand={handleSlashCommand}
-        onAddEnvironmentPack={() => setShowPackModal(true)}
-        isLoading={state.isLoading}
-        permissionMode={permissionMode}
-        onToggleMode={toggleMode}
-        showToolDetails={showToolDetails}
-        onToggleToolDetails={() => setShowToolDetails((v) => !v)}
-      />
+          <ChatMessages
+            messages={state.messages}
+            onReuse={handleReuseMessage}
+            showToolDetails={showToolDetails}
+          />
+
+          {intentGuardRequest && (
+            <IntentGuardPanel
+              request={intentGuardRequest}
+              onResolved={() => setIntentGuardRequest(null)}
+            />
+          )}
+
+          {permissionRequest && (
+            <PermissionInputPanel
+              request={permissionRequest}
+              onAllow={handlePermissionAllow}
+              onDeny={handlePermissionDeny}
+            />
+          )}
+
+          {planRequest && (
+            <PlanPermissionInputPanel
+              onAcceptWithAutoEdits={handlePlanAcceptAuto}
+              onAcceptManual={handlePlanAcceptManual}
+              onKeepPlanning={handlePlanKeep}
+            />
+          )}
+
+          {anomalyAlert && (
+            <AnomalyAlertBanner
+              alert={anomalyAlert}
+              onDismiss={() => setAnomalyAlert(null)}
+            />
+          )}
+
+          {state.isLoading && (
+            <div className="typing-bar">
+              <TypingIndicator messages={state.messages} />
+            </div>
+          )}
+
+          {queue.length > 0 && (
+            <div className="chat-queue" aria-label="Queued messages">
+              <span className="chat-queue-label">
+                Queued · auto-sends next ({queue.length})
+              </span>
+              {queue.map((item, i) => (
+                <div className="chat-queue-item" key={item.id}>
+                  <span className="chat-queue-num">{i + 1}</span>
+                  <span className="chat-queue-text" title={item.message}>
+                    {item.message.trim() ||
+                      (item.attachments.length > 0
+                        ? `[${item.attachments.length} attachment${
+                            item.attachments.length === 1 ? "" : "s"
+                          }]`
+                        : "(empty)")}
+                  </span>
+                  <button
+                    type="button"
+                    className="chat-queue-cancel"
+                    onClick={() => cancelQueued(item.id)}
+                    title="Remove from queue"
+                    aria-label="Remove queued message"
+                  >
+                    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
+                      <path
+                        d="M4 4l8 8M12 4l-8 8"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <ChatInput
+            ref={setChatInputRef}
+            onSend={handleSend}
+            onStop={handleStop}
+            onSlashCommand={handleSlashCommand}
+            onAddEnvironmentPack={() => setShowPackModal(true)}
+            isLoading={state.isLoading}
+            permissionMode={permissionMode}
+            onToggleMode={toggleMode}
+            showToolDetails={showToolDetails}
+            onToggleToolDetails={() => setShowToolDetails((v) => !v)}
+          />
         </>
       )}
 
@@ -1625,9 +1721,17 @@ export function ChatPanel({
         onClose={() => setShowAccountModal(false)}
         focus={accountModalFocus}
         connected={isConnected}
-        authMethod={connection.status === "connected" ? connection.authMethod ?? null : null}
-        apiKeyMasked={connection.status === "connected" ? connection.apiKeyMasked : null}
-        version={connection.status === "connected" ? connection.version : undefined}
+        authMethod={
+          connection.status === "connected"
+            ? (connection.authMethod ?? null)
+            : null
+        }
+        apiKeyMasked={
+          connection.status === "connected" ? connection.apiKeyMasked : null
+        }
+        version={
+          connection.status === "connected" ? connection.version : undefined
+        }
         workingDirectory={workingDirectory}
         inputTokens={tokenUsage.inputTokens}
         outputTokens={tokenUsage.outputTokens}
@@ -1737,9 +1841,11 @@ function CompactRing({
   const c = 2 * Math.PI * r;
   const dashOffset = c * (1 - clamped);
   const color =
-    clamped >= 0.9 ? "var(--vsc-error)"
-    : clamped >= 0.7 ? "var(--vsc-warning, #d7a55f)"
-    : "var(--vsc-accent)";
+    clamped >= 0.9
+      ? "var(--vsc-error)"
+      : clamped >= 0.7
+        ? "var(--vsc-warning, #d7a55f)"
+        : "var(--vsc-accent)";
   const pct = Math.round(clamped * 100);
   return (
     <button
@@ -1777,7 +1883,9 @@ function CompactRing({
           strokeDasharray={c}
           strokeDashoffset={dashOffset}
           transform="rotate(-90 8 8)"
-          style={{ transition: "stroke-dashoffset 0.3s ease, stroke 0.3s ease" }}
+          style={{
+            transition: "stroke-dashoffset 0.3s ease, stroke 0.3s ease",
+          }}
         />
       </svg>
     </button>
